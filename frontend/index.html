@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TrailCoach</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 1rem; background: #0f172a; color: #e2e8f0; }
+    h1 { margin: 0 0 1rem; font-size: 1.5rem; }
+    .grid { display: grid; grid-template-columns: 320px 1fr; gap: 1rem; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .panel { background: #1e293b; border-radius: 0.75rem; padding: 1rem; }
+    .activity { cursor: pointer; padding: 0.5rem; border-bottom: 1px solid #334155; }
+    .activity:hover { background: #334155; }
+    .activity.active { background: #2563eb; }
+    .muted { color: #94a3b8; font-size: 0.85rem; }
+    #profile { width: 100%; height: 420px; }
+    #weekly { width: 100%; height: 280px; }
+    .metric { display: inline-block; margin-right: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>TrailCoach <span class="muted">Fase 0 — FIT local</span></h1>
+  <div class="grid">
+    <div class="panel">
+      <h2>Actividades</h2>
+      <div id="activities"></div>
+    </div>
+    <div>
+      <div class="panel" id="detail">
+        <h2>Detalle</h2>
+        <div id="detail-content">Selecciona una actividad.</div>
+      </div>
+      <div class="panel">
+        <h2>Perfil de actividad</h2>
+        <div id="profile"></div>
+      </div>
+      <div class="panel">
+        <h2>Volumen semanal</h2>
+        <div id="weekly"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const fmt = (n) => n == null ? '-' : Number(n).toFixed(2);
+
+    async function loadActivities() {
+      const res = await fetch('/v1/activities?limit=50');
+      const data = await res.json();
+      const container = document.getElementById('activities');
+      container.innerHTML = '';
+      data.forEach(a => {
+        const el = document.createElement('div');
+        el.className = 'activity';
+        el.dataset.id = a.id;
+        el.innerHTML = `<div><strong>${a.start_time_utc ? a.start_time_utc.split('T')[0] : '?'}</strong> — ${a.sport}</div>
+          <div class="muted">${a.distance_km} km · ${a.duration_min} min · ${a.ascent_m} m D+</div>`;
+        el.addEventListener('click', () => selectActivity(a.id, el));
+        container.appendChild(el);
+      });
+      if (data[0]) selectActivity(data[0].id, container.firstElementChild);
+    }
+
+    let profileChart, weeklyChart;
+
+    async function selectActivity(id, el) {
+      document.querySelectorAll('.activity').forEach(e => e.classList.remove('active'));
+      if (el) el.classList.add('active');
+
+      const [detail, series] = await Promise.all([
+        fetch(`/v1/activities/${id}`).then(r => r.json()),
+        fetch(`/v1/activities/${id}/timeseries?channels=altitude_m,hr_bpm,speed_mps&max_points=800`).then(r => r.json())
+      ]);
+
+      document.getElementById('detail-content').innerHTML = `
+        <div class="metric"><span class="muted">Distancia</span><br>${fmt(detail.distance_km)} km</div>
+        <div class="metric"><span class="muted">Tiempo</span><br>${fmt(detail.duration_min)} min</div>
+        <div class="metric"><span class="muted">D+ / D-</span><br>${fmt(detail.ascent_m)} / ${fmt(detail.descent_m)} m</div>
+        <div class="metric"><span class="muted">HR media / máx</span><br>${detail.avg_hr} / ${detail.max_hr} bpm</div>
+        <div class="metric"><span class="muted">Calidad</span><br>${detail.data_quality}</div>
+        <div class="muted" style="margin-top:0.5rem">${detail.quality_flags?.length ? 'Flags: ' + detail.quality_flags.join(', ') : ''}</div>
+      `;
+
+      if (!profileChart) profileChart = echarts.init(document.getElementById('profile'));
+      const t = series.data.t_s.map(ts => new Date(ts * 1000).toLocaleTimeString());
+      const opt = {
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['Altitud (m)', 'HR (bpm)', 'Velocidad (km/h)'], textStyle: { color: '#cbd5e1' } },
+        grid: { left: 50, right: 50, top: 50, bottom: 30 },
+        xAxis: { type: 'category', data: t, axisLine: { lineStyle: { color: '#94a3b8' } } },
+        yAxis: [
+          { type: 'value', name: 'Altitud', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { lineStyle: { color: '#334155' } } },
+          { type: 'value', name: 'HR', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { show: false } }
+        ],
+        series: [
+          { name: 'Altitud (m)', type: 'line', data: series.data.altitude_m || [], showSymbol: false, yAxisIndex: 0, lineStyle: { color: '#22c55e' }, areaStyle: { color: 'rgba(34,197,94,0.1)' } },
+          { name: 'HR (bpm)', type: 'line', data: series.data.hr_bpm || [], showSymbol: false, yAxisIndex: 1, lineStyle: { color: '#ef4444' } },
+          { name: 'Velocidad (km/h)', type: 'line', data: (series.data.speed_mps || []).map(v => v == null ? null : v * 3.6), showSymbol: false, yAxisIndex: 0, lineStyle: { color: '#3b82f6' } }
+        ]
+      };
+      profileChart.setOption(opt, true);
+    }
+
+    async function loadWeekly() {
+      const data = await fetch('/v1/weekly-volume?weeks=52').then(r => r.json());
+      if (!weeklyChart) weeklyChart = echarts.init(document.getElementById('weekly'));
+      weeklyChart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['Distancia (km)', 'Tiempo (h)', 'D+ (m)'], textStyle: { color: '#cbd5e1' } },
+        grid: { left: 50, right: 50, top: 40, bottom: 30 },
+        xAxis: { type: 'category', data: data.map(d => d.week), axisLine: { lineStyle: { color: '#94a3b8' } } },
+        yAxis: [
+          { type: 'value', name: 'km/h', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { lineStyle: { color: '#334155' } } }
+        ],
+        series: [
+          { name: 'Distancia (km)', type: 'bar', data: data.map(d => d.distance_km), itemStyle: { color: '#3b82f6' } },
+          { name: 'Tiempo (h)', type: 'line', data: data.map(d => d.duration_h), lineStyle: { color: '#f59e0b' } },
+          { name: 'D+ (m)', type: 'line', data: data.map(d => d.ascent_m), lineStyle: { color: '#22c55e' } }
+        ]
+      }, true);
+    }
+
+    window.addEventListener('resize', () => { profileChart && profileChart.resize(); weeklyChart && weeklyChart.resize(); });
+    loadActivities();
+    loadWeekly();
+  </script>
+</body>
+</html>
