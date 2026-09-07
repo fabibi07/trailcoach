@@ -1,5 +1,7 @@
 """CLI for TrailCoach."""
 
+import json
+from datetime import date, datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -12,6 +14,8 @@ from trailcoach.db.models import Athlete
 from trailcoach.db.session import SessionLocal
 from trailcoach.ingest.raw_store import RawStore
 from trailcoach.providers.fit_parser import FitParser
+from trailcoach.training.engine import recalculate_athlete
+from trailcoach.training.thresholds import set_threshold
 
 
 @click.group()
@@ -98,6 +102,108 @@ def ingest_fitfiles(path: Path, athlete_id: str, dry_run: bool, ext: str):
     finally:
         db.close()
     click.echo(f"Created {created}, existing {existing}, failed {failed}.")
+
+
+@cli.command("set-threshold")
+@click.option("--athlete-id", required=True, help="Athlete UUID.")
+@click.option("--kind", required=True, help="Threshold kind (e.g. ftp_pace_mps, lthr_bpm).")
+@click.option("--value", required=True, type=float, help="Threshold value.")
+@click.option("--unit", default="", help="Unit of measurement.")
+@click.option(
+    "--valid-from",
+    required=True,
+    type=click.DateTime(formats=["%Y-%m-%d"]),
+    help="Date from which the threshold is valid (YYYY-MM-DD).",
+)
+@click.option("--source", default="manual", help="Source of the value.")
+@click.option("--notes", default=None, help="Optional notes.")
+def set_threshold_cmd(
+    athlete_id: str,
+    kind: str,
+    value: float,
+    unit: str,
+    valid_from: datetime,
+    source: str,
+    notes: str | None,
+):
+    """Insert or update a versioned athlete threshold."""
+    db = SessionLocal()
+    try:
+        threshold = set_threshold(
+            db,
+            UUID(athlete_id),
+            kind,
+            value,
+            unit,
+            valid_from.date(),
+            source=source,
+            notes=notes,
+        )
+        db.commit()
+        click.echo(f"Set {threshold.kind}={threshold.value} from {threshold.valid_from}")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@cli.command("seed-thresholds")
+@click.argument(
+    "file_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option("--athlete-id", required=True, help="Athlete UUID.")
+def seed_thresholds(file_path: Path, athlete_id: str):
+    """Seed thresholds from a JSON file (list of {kind, value, unit, valid_from, ...})."""
+    data = json.loads(file_path.read_text())
+    db = SessionLocal()
+    try:
+        for item in data:
+            set_threshold(
+                db,
+                UUID(athlete_id),
+                item["kind"],
+                float(item["value"]),
+                item["unit"],
+                date.fromisoformat(item["valid_from"]),
+                source=item.get("source", "manual"),
+                notes=item.get("notes"),
+                confidence=item.get("confidence"),
+            )
+        db.commit()
+        click.echo(f"Seeded {len(data)} thresholds for athlete {athlete_id}")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@cli.command()
+@click.option("--athlete-id", required=True, help="Athlete UUID.")
+@click.option(
+    "--from-date",
+    type=click.DateTime(formats=["%Y-%m-%d"]),
+    default=None,
+    help="Only recompute from this date (YYYY-MM-DD).",
+)
+def recalculate(athlete_id: str, from_date: datetime | None):
+    """Recompute activity loads, daily loads and PMC for the athlete."""
+    db = SessionLocal()
+    try:
+        result = recalculate_athlete(
+            db,
+            UUID(athlete_id),
+            from_date=from_date.date() if from_date else None,
+            commit=True,
+        )
+        click.echo(f"Recalculated: {result}")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 @cli.command()
