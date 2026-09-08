@@ -1,4 +1,4 @@
-"""CLI for TrailCoach."""
+"""CLI de TrailCoach."""
 
 import json
 from datetime import date, datetime
@@ -20,33 +20,33 @@ from trailcoach.training.thresholds import set_threshold
 
 @click.group()
 def cli():
-    """TrailCoach command line interface."""
+    """Interfaz de línea de comandos de TrailCoach."""
     pass
 
 
 @cli.command()
-@click.option("--drop", is_flag=True, help="Drop existing tables.")
+@click.option("--drop", is_flag=True, help="Elimina las tablas existentes.")
 def init_db(drop: bool):
-    """Create database tables."""
+    """Crea las tablas de la base de datos."""
     engine = create_engine(str(settings.db_url))
     if drop:
         Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
-    click.echo(f"Database initialized at {settings.db_url}")
+    click.echo(f"Base de datos inicializada en {settings.db_url}")
 
 
 @cli.command()
-@click.option("--name", required=True, help="Athlete display name.")
-@click.option("--sex", type=click.Choice(["M", "F", None]), default=None, help="Sex (M/F).")
-@click.option("--tz", default="UTC", help="Default timezone.")
+@click.option("--name", required=True, help="Nombre visible del atleta.")
+@click.option("--sex", type=click.Choice(["M", "F", None]), default=None, help="Sexo (M/F).")
+@click.option("--tz", default="UTC", help="Zona horaria por defecto.")
 def create_athlete(name: str, sex: str | None, tz: str):
-    """Create the (single) athlete record."""
+    """Crea el registro (único) del atleta."""
     db = SessionLocal()
     try:
         athlete = Athlete(display_name=name, sex=sex, tz_default=tz)
         db.add(athlete)
         db.commit()
-        click.echo(f"Created athlete {athlete.id}")
+        click.echo(f"Creado atleta {athlete.id}")
     finally:
         db.close()
 
@@ -56,21 +56,21 @@ def create_athlete(name: str, sex: str | None, tz: str):
     "path",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
 )
-@click.option("--athlete-id", required=True, help="Athlete UUID.")
-@click.option("--dry-run", is_flag=True, help="Parse but do not write to DB.")
-@click.option("--ext", default=".fit", help="File extension to ingest.")
+@click.option("--athlete-id", required=True, help="UUID del atleta.")
+@click.option("--dry-run", is_flag=True, help="Parsea pero no escribe en la BD.")
+@click.option("--ext", default=".fit", help="Extensión de archivo a ingerir.")
 def ingest_fitfiles(path: Path, athlete_id: str, dry_run: bool, ext: str):
-    """Ingest all .fit files from a directory."""
+    """Ingesta todos los archivos .fit de un directorio."""
     athlete_uuid = UUID(athlete_id)
     store = RawStore()
     parser = FitParser(store)
     db = SessionLocal()
     files = sorted(path.rglob(f"*{ext}"))
     if not files:
-        click.echo(f"No {ext} files found in {path}")
+        click.echo(f"No se encontraron archivos {ext} en {path}")
         return
 
-    click.echo(f"Found {len(files)} files.")
+    click.echo(f"Encontrados {len(files)} archivos.")
     created = 0
     existing = 0
     failed = 0
@@ -86,7 +86,7 @@ def ingest_fitfiles(path: Path, athlete_id: str, dry_run: bool, ext: str):
                     extension=".fit",
                 )
                 if dry_run:
-                    click.echo(f"[dry-run] {f}")
+                    click.echo(f"[simulación] {f}")
                     continue
                 parsed = parser.parse_to_source_activity(db, raw, athlete_uuid)
                 activity_id = parsed.activity.id if parsed.activity else "n/a"
@@ -94,29 +94,29 @@ def ingest_fitfiles(path: Path, athlete_id: str, dry_run: bool, ext: str):
                 created += 1
             except Exception as e:
                 failed += 1
-                click.echo(f"  FAIL: {f.name} -> {e}", err=True)
+                click.echo(f"  FALLÓ: {f.name} -> {e}", err=True)
         db.commit()
     except Exception:
         db.rollback()
         raise
     finally:
         db.close()
-    click.echo(f"Created {created}, existing {existing}, failed {failed}.")
+    click.echo(f"Creados {created}, existentes {existing}, fallidos {failed}.")
 
 
 @cli.command("set-threshold")
-@click.option("--athlete-id", required=True, help="Athlete UUID.")
-@click.option("--kind", required=True, help="Threshold kind (e.g. ftp_pace_mps, lthr_bpm).")
-@click.option("--value", required=True, type=float, help="Threshold value.")
-@click.option("--unit", default="", help="Unit of measurement.")
+@click.option("--athlete-id", required=True, help="UUID del atleta.")
+@click.option("--kind", required=True, help="Tipo de umbral (ej. ftp_pace_mps, lthr_bpm).")
+@click.option("--value", required=True, type=float, help="Valor del umbral.")
+@click.option("--unit", default="", help="Unidad de medida.")
 @click.option(
     "--valid-from",
     required=True,
     type=click.DateTime(formats=["%Y-%m-%d"]),
-    help="Date from which the threshold is valid (YYYY-MM-DD).",
+    help="Fecha desde la cual el umbral es válido (YYYY-MM-DD).",
 )
-@click.option("--source", default="manual", help="Source of the value.")
-@click.option("--notes", default=None, help="Optional notes.")
+@click.option("--source", default="manual", help="Fuente del valor.")
+@click.option("--notes", default=None, help="Notas opcionales.")
 def set_threshold_cmd(
     athlete_id: str,
     kind: str,
@@ -126,7 +126,7 @@ def set_threshold_cmd(
     source: str,
     notes: str | None,
 ):
-    """Insert or update a versioned athlete threshold."""
+    """Inserta o actualiza un umbral versionado del atleta."""
     db = SessionLocal()
     try:
         threshold = set_threshold(
@@ -140,7 +140,7 @@ def set_threshold_cmd(
             notes=notes,
         )
         db.commit()
-        click.echo(f"Set {threshold.kind}={threshold.value} from {threshold.valid_from}")
+        click.echo(f"Establecido {threshold.kind}={threshold.value} desde {threshold.valid_from}")
     except Exception:
         db.rollback()
         raise
@@ -153,9 +153,10 @@ def set_threshold_cmd(
     "file_path",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
-@click.option("--athlete-id", required=True, help="Athlete UUID.")
+@click.option("--athlete-id", required=True, help="UUID del atleta.")
 def seed_thresholds(file_path: Path, athlete_id: str):
-    """Seed thresholds from a JSON file (list of {kind, value, unit, valid_from, ...})."""
+    """Carga umbrales iniciales desde un archivo JSON
+    (lista de {kind, value, unit, valid_from, ...})."""
     data = json.loads(file_path.read_text())
     db = SessionLocal()
     try:
@@ -172,7 +173,7 @@ def seed_thresholds(file_path: Path, athlete_id: str):
                 confidence=item.get("confidence"),
             )
         db.commit()
-        click.echo(f"Seeded {len(data)} thresholds for athlete {athlete_id}")
+        click.echo(f"Cargados {len(data)} umbrales para el atleta {athlete_id}")
     except Exception:
         db.rollback()
         raise
@@ -181,15 +182,15 @@ def seed_thresholds(file_path: Path, athlete_id: str):
 
 
 @cli.command()
-@click.option("--athlete-id", required=True, help="Athlete UUID.")
+@click.option("--athlete-id", required=True, help="UUID del atleta.")
 @click.option(
     "--from-date",
     type=click.DateTime(formats=["%Y-%m-%d"]),
     default=None,
-    help="Only recompute from this date (YYYY-MM-DD).",
+    help="Solo recalcular desde esta fecha (YYYY-MM-DD).",
 )
 def recalculate(athlete_id: str, from_date: datetime | None):
-    """Recompute activity loads, daily loads and PMC for the athlete."""
+    """Recalcula cargas de actividad, cargas diarias y PMC para el atleta."""
     db = SessionLocal()
     try:
         result = recalculate_athlete(
@@ -198,7 +199,7 @@ def recalculate(athlete_id: str, from_date: datetime | None):
             from_date=from_date.date() if from_date else None,
             commit=True,
         )
-        click.echo(f"Recalculated: {result}")
+        click.echo(f"Recalculado: {result}")
     except Exception:
         db.rollback()
         raise
@@ -211,7 +212,7 @@ def recalculate(athlete_id: str, from_date: datetime | None):
 @click.option("--port", default=8000, type=int)
 @click.option("--reload", is_flag=True)
 def serve(host: str, port: int, reload: bool):
-    """Run the FastAPI development server."""
+    """Ejecuta el servidor de desarrollo FastAPI."""
     import uvicorn
 
     uvicorn.run("trailcoach.api.main:app", host=host, port=port, reload=reload)
