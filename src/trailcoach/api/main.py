@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
+import polars as pl
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +17,7 @@ from trailcoach.db.models import (
     ActivityStreamChannel,
     ActivityStreamSet,
     Athlete,
+    AthleteThreshold,
     DailyLoad,
     SourceActivity,
     TrainingMetricDaily,
@@ -165,12 +167,26 @@ def get_activity(activity_id: UUID):
     }
 
 
-@app.get("/v1/activities/{activity_id}/timeseries")
-def get_timeseries(activity_id: UUID, channels: str | None = None, max_points: int = 500):
-    """Return downsampled timeseries for an activity."""
-    import polars as pl
+def _pace_min_km(s: pl.Series) -> pl.Series:
+    """Convert speed (m/s) to pace (min/km), capping very slow/stopped samples."""
+    def _to_pace(v: float | None) -> float | None:
+        if v is None or v <= 0:
+            return None
+        pace = 16.6666667 / v
+        return None if pace > 20 else pace
 
+    return s.map_elements(_to_pace, return_dtype=pl.Float64)
+
+
+@app.get("/v1/activities/{activity_id}/timeseries")
+def get_timeseries(
+    activity_id: UUID,
+    channels: str | None = None,
+    max_points: int = 2000,
+):
+    """Return downsampled timeseries for an activity, with derived running channels."""
     from trailcoach.core.config import settings
+    from trailcoach.training.grade import add_grade_to_dataframe, grade_adjusted_speed
 
     db = next(_get_db())
     stream_set = (
@@ -184,16 +200,41 @@ def get_timeseries(activity_id: UUID, channels: str | None = None, max_points: i
     if not path.exists():
         raise HTTPException(404, "Parquet file missing")
     df = pl.read_parquet(path)
-    requested = (channels or ",").split(",")
-    requested = [c for c in requested if c and c in df.columns]
+
+    # Derive grade and grade-adjusted speed/pace on demand.
+    df = add_grade_to_dataframe(df)
+    if "speed_mps" in df.columns:
+        gap = [
+            grade_adjusted_speed(s, g)
+            for s, g in zip(
+                df["speed_mps"].to_list(), df["grade_pct"].to_list(), strict=False
+            )
+        ]
+        df = df.with_columns(
+            pl.Series("gap_mps", gap, dtype=pl.Float64),
+            _pace_min_km(df["speed_mps"]).alias("pace_min_km"),
+        )
+        if "gap_mps" in df.columns:
+            df = df.with_columns(_pace_min_km(df["gap_mps"]).alias("gap_pace_min_km"))
+
+    available = [c for c in df.columns if c != "t_s"]
+
+    requested = (channels or "").split(",")
+    requested = [c.strip() for c in requested if c.strip()]
     if not requested:
-        requested = [c for c in df.columns if c != "t_s"]
+        requested = ["altitude_m", "hr_bpm", "speed_mps", "grade_pct", "pace_min_km"]
+    requested = [c for c in requested if c in df.columns]
+    if not requested:
+        requested = available[:5]
+
     if len(df) > max_points:
         step = max(1, len(df) // max_points)
         df = df[::step]
+
     return {
         "activity_id": str(activity_id),
         "channels": requested,
+        "available": available,
         "count": len(df),
         "data": {c: df[c].to_list() for c in ["t_s"] + requested if c in df.columns},
     }
@@ -346,3 +387,81 @@ def athlete_state():
                 for kind, t in thresholds.items()
             },
         }
+
+
+@app.get("/v1/athlete-thresholds")
+def list_thresholds():
+    """Return the versioned threshold history for the configured athlete."""
+    db = next(_get_db())
+    athlete = db.query(Athlete).first()
+    if not athlete:
+        raise HTTPException(404, "No athlete configured")
+    rows = (
+        db.query(AthleteThreshold)
+        .filter(AthleteThreshold.athlete_id == athlete.id)
+        .order_by(AthleteThreshold.kind, AthleteThreshold.valid_from)
+        .all()
+    )
+    return [
+        {
+            "kind": r.kind,
+            "value": float(r.value),
+            "unit": r.unit,
+            "valid_from": r.valid_from.isoformat(),
+            "valid_to": r.valid_to.isoformat() if r.valid_to else None,
+            "source": r.source,
+        }
+        for r in rows
+    ]
+
+
+@app.get("/v1/weekly-load")
+def weekly_load(weeks: int = 12):
+    """Aggregated weekly load/volume from DailyLoad for charts."""
+    from collections import defaultdict
+    from typing import Any
+
+    db = next(_get_db())
+    athlete = db.query(Athlete).first()
+    if not athlete:
+        raise HTTPException(404, "No athlete configured")
+    today = date.today()
+    start = today - timedelta(weeks=weeks)
+    rows = (
+        db.query(DailyLoad)
+        .filter(
+            DailyLoad.athlete_id == athlete.id,
+            DailyLoad.date >= start,
+            DailyLoad.date <= today,
+        )
+        .order_by(DailyLoad.date)
+        .all()
+    )
+    agg: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "load": 0.0,
+            "distance_m": 0.0,
+            "ascent_m": 0.0,
+            "duration_s": 0.0,
+            "n_activities": 0,
+        }
+    )
+    for r in rows:
+        y, w, _ = r.date.isocalendar()
+        key = f"{y}-W{w:02d}"
+        agg[key]["load"] += float(r.load_primary or 0)
+        agg[key]["distance_m"] += float(r.distance_m or 0)
+        agg[key]["ascent_m"] += float(r.ascent_m or 0)
+        agg[key]["duration_s"] += float(r.duration_s or 0)
+        agg[key]["n_activities"] += int(r.n_activities or 0)
+    return [
+        {
+            "week": key,
+            "load": round(v["load"], 2),
+            "distance_km": round(v["distance_m"] / 1000, 2),
+            "ascent_m": round(v["ascent_m"], 2),
+            "duration_h": round(v["duration_s"] / 3600, 2),
+            "activities": v["n_activities"],
+        }
+        for key, v in sorted(agg.items())
+    ]

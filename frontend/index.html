@@ -6,172 +6,454 @@
   <title>TrailCoach</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
   <style>
-    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 1rem; background: #0f172a; color: #e2e8f0; }
-    h1 { margin: 0 0 1rem; font-size: 1.5rem; }
-    .grid { display: grid; grid-template-columns: 320px 1fr; gap: 1rem; }
-    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
-    .panel { background: #1e293b; border-radius: 0.75rem; padding: 1rem; }
-    .activity { cursor: pointer; padding: 0.5rem; border-bottom: 1px solid #334155; }
-    .activity:hover { background: #334155; }
-    .activity.active { background: #2563eb; }
-    .muted { color: #94a3b8; font-size: 0.85rem; }
-    #profile { width: 100%; height: 420px; }
-    #weekly { width: 100%; height: 280px; }
-    #pmc { width: 100%; height: 340px; }
-    .metric { display: inline-block; margin-right: 1rem; }
+    :root { --bg: #0f172a; --panel: #1e293b; --text: #e2e8f0; --muted: #94a3b8; --accent: #3b82f6; --ok:#22c55e; --warn:#f59e0b; --danger:#ef4444; }
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin:0; padding:1rem; background:var(--bg); color:var(--text); }
+    h1 { margin:0 0 .5rem; font-size:1.25rem; }
+    .muted { color:var(--muted); font-size:.85rem; }
+    .tabs { display:flex; gap:.5rem; margin-bottom:1rem; }
+    .tab { background:var(--panel); color:var(--text); border:none; padding:.5rem 1rem; border-radius:.5rem; cursor:pointer; }
+    .tab.active { background:var(--accent); }
+    .tab-content { display:none; }
+    .tab-content.active { display:block; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:1rem; }
+    .grid-1 { grid-template-columns: 1fr; }
+    .panel { background:var(--panel); border-radius:.75rem; padding:1rem; }
+    .cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:.75rem; }
+    .card { background:#0f172a66; border-radius:.5rem; padding:.75rem; text-align:center; }
+    .card .value { font-size:1.5rem; font-weight:700; }
+    .card .label { font-size:.75rem; color:var(--muted); margin-top:.25rem; }
+    .chart { width:100%; height:320px; }
+    .chart-tall { height:420px; }
+    .activity { cursor:pointer; padding:.5rem; border-bottom:1px solid #334155; }
+    .activity:hover, .activity.active { background:#334155; }
+    .two-col { display:grid; grid-template-columns: 280px 1fr; gap:1rem; }
+    @media (max-width:900px) { .two-col { grid-template-columns: 1fr; } }
+    .selectors { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:.75rem; }
+    .selectors label { display:flex; align-items:center; gap:.25rem; font-size:.8rem; color:var(--muted); cursor:pointer; }
+    #profile-charts { display:flex; flex-direction:column; gap:.5rem; }
+    .mini-chart { height:180px; width:100%; }
+    .laps-wrap { max-height: 260px; overflow: auto; border: 1px solid #334155; border-radius: .25rem; }
+    table { width:100%; border-collapse:collapse; font-size:.85rem; }
+    th, td { padding:.4rem; text-align:left; border-bottom:1px solid #334155; }
+    th { color:var(--muted); }
+    .tag { display:inline-block; padding:.1rem .4rem; border-radius:.25rem; font-size:.75rem; }
+    .tag-green { background:#22c55e33; color:var(--ok); }
+    .tag-yellow { background:#f59e0b33; color:var(--warn); }
+    .tag-red { background:#ef444433; color:var(--danger); }
+    .tag-blue { background:#3b82f633; color:var(--accent); }
   </style>
 </head>
 <body>
-  <h1>TrailCoach <span class="muted">Fase 1 — Training Engine</span></h1>
-  <div class="grid">
-    <div class="panel">
-      <h2>Actividades</h2>
-      <div id="activities"></div>
-    </div>
-    <div>
+  <h1>TrailCoach <span class="muted">Fase 2 — Training Engine + UI</span></h1>
+  <div class="tabs">
+    <button class="tab active" data-tab="dashboard">Resumen</button>
+    <button class="tab" data-tab="activity">Actividad</button>
+  </div>
+
+  <div id="dashboard" class="tab-content active">
+    <div class="grid grid-1">
       <div class="panel" id="athlete-state-panel">
         <h2>Estado del atleta</h2>
         <div id="athlete-state">Cargando...</div>
       </div>
-      <div class="panel" id="detail">
-        <h2>Detalle</h2>
-        <div id="detail-content">Selecciona una actividad.</div>
-      </div>
-      <div class="panel">
-        <h2>Perfil de actividad</h2>
-        <div id="profile"></div>
-      </div>
+    </div>
+    <div class="grid">
       <div class="panel">
         <h2>PMC (CTL / ATL / TSB)</h2>
-        <div id="pmc"></div>
+        <div id="pmc" class="chart"></div>
+      </div>
+      <div class="panel">
+        <h2>Carga semanal</h2>
+        <div id="weekly-load" class="chart"></div>
       </div>
       <div class="panel">
         <h2>Volumen semanal</h2>
-        <div id="weekly"></div>
+        <div id="weekly-volume" class="chart"></div>
+      </div>
+      <div class="panel">
+        <h2>Evolución de umbrales</h2>
+        <div id="thresholds" class="chart"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="activity" class="tab-content">
+    <div class="two-col">
+      <div class="panel" style="max-height:85vh; overflow:auto;">
+        <h2>Actividades</h2>
+        <div id="activities"></div>
+      </div>
+      <div>
+        <div class="panel">
+          <h2>Detalle</h2>
+          <div id="detail-content">Selecciona una actividad.</div>
+        </div>
+        <div class="panel">
+          <h2>Canales</h2>
+          <div class="selectors" id="channel-selectors"></div>
+          <div id="profile-charts"></div>
+        </div>
       </div>
     </div>
   </div>
 
   <script>
-    const fmt = (n) => n == null ? '-' : Number(n).toFixed(2);
+    const fmt = (n, d=2) => n == null || isNaN(n) ? '-' : Number(n).toFixed(d);
+    const fmtInt = (n) => n == null || isNaN(n) ? '-' : Math.round(n).toString();
+    function fmtPace(v) {
+      if (v == null || v <= 0) return '-';
+      const m = Math.floor(v), s = Math.round((v - m) * 60);
+      if (s === 60) return `${m + 1}:00`;
+      return `${m}:${s.toString().padStart(2, '0')}`;
+    }
+    function fmtDur(s) {
+      if (s == null || s < 0) return '-';
+      const h = Math.floor(s / 3600); s %= 3600;
+      const m = Math.floor(s / 60); const sec = Math.floor(s % 60);
+      if (h > 0) return `${h}:${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
+      return `${m}:${sec.toString().padStart(2,'0')}`;
+    }
+    function fmtDate(iso) { return iso ? new Date(iso).toLocaleDateString('es-CL') : '-'; }
+
+    const tsbClass = (label) => {
+      if (label === 'very high') return 'tag-blue';
+      if (label === 'high') return 'tag-green';
+      if (label === 'low') return 'tag-yellow';
+      if (label === 'very low') return 'tag-red';
+      return 'tag';
+    };
+
+    const CHAN_CFG = {
+      altitude_m: { label: 'Altitud', unit: 'm', color: '#22c55e', area: true },
+      hr_bpm: { label: 'FC', unit: 'bpm', color: '#ef4444' },
+      speed_mps: { label: 'Velocidad', unit: 'km/h', color: '#3b82f6', scale: 3.6 },
+      pace_min_km: { label: 'Ritmo', unit: 'min/km', color: '#f59e0b', formatter: fmtPace },
+      gap_mps: { label: 'NGP', unit: 'm/s', color: '#a855f7' },
+      gap_pace_min_km: { label: 'Ritmo ajustado', unit: 'min/km', color: '#a855f7', formatter: fmtPace },
+      grade_pct: { label: 'Pendiente', unit: '%', color: '#eab308' },
+      cadence_spm: { label: 'Cadencia', unit: 'pasos/min', color: '#06b6d4' },
+      power_w: { label: 'Potencia', unit: 'W', color: '#f97316' },
+      temp_c: { label: 'Temp', unit: '°C', color: '#14b8a6' },
+      vertical_oscillation_mm: { label: 'Osc. vertical', unit: 'mm', color: '#ec4899' },
+      stance_time_ms: { label: 'Tiempo apoyo', unit: 'ms', color: '#8b5cf6' },
+      stance_time_balance_pct: { label: 'Balance apoyo', unit: '%', color: '#6366f1' },
+      step_length_mm: { label: 'Longitud paso', unit: 'mm', color: '#10b981' },
+      vertical_ratio_pct: { label: 'Ratio vertical', unit: '%', color: '#84cc16' },
+    };
+    function chanInfo(key) { return CHAN_CFG[key] || { label: key, unit: '', color: '#94a3b8' }; }
+
+    document.querySelectorAll('.tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.tab).classList.add('active');
+        window.dispatchEvent(new Event('resize'));
+      });
+    });
+
+    // --- Dashboard ---
+    let pmcChart, weeklyLoadChart, weeklyVolChart, thresholdsChart;
+    let profileCharts = [];
+
+    async function loadDashboard() {
+      const state = await fetch('/v1/athlete-state').then(r => r.json());
+      renderAthleteState(state);
+      renderPmc();
+      renderWeeklyLoad();
+      renderWeeklyVolume();
+      renderThresholds();
+    }
+
+    function renderAthleteState(s) {
+      const thresholds = s.thresholds_active || {};
+      const ftpPace = thresholds.ftp_pace_mps ? fmtPace(16.6666667 / thresholds.ftp_pace_mps.value) : '-';
+      const lthr = thresholds.lthr_bpm ? fmt(thresholds.lthr_bpm.value, 0) : '-';
+      const panel = document.getElementById('athlete-state');
+      panel.innerHTML = `
+        <div class="cards">
+          <div class="card">
+            <div class="value" style="color:var(--ok)">${fmt(s.fitness?.ctl, 1)}</div>
+            <div class="label">Fitness (CTL)</div>
+          </div>
+          <div class="card">
+            <div class="value" style="color:var(--danger)">${fmt(s.fatigue?.atl, 1)}</div>
+            <div class="label">Fatiga (ATL)</div>
+          </div>
+          <div class="card">
+            <div class="value">${fmt(s.form?.tsb, 1)}</div>
+            <div class="label">Forma (TSB)<br><span class="tag ${tsbClass(s.form?.label)}">${s.form?.label || '-'}</span></div>
+          </div>
+          <div class="card">
+            <div class="value">${fmt(s.last_7d?.load, 0)}</div>
+            <div class="label">7 días carga</div>
+          </div>
+          <div class="card">
+            <div class="value">${fmt(s.last_7d?.distance_km, 1)}</div>
+            <div class="label">7 días km</div>
+          </div>
+          <div class="card">
+            <div class="value">${fmtInt(s.last_7d?.ascent_m)}</div>
+            <div class="label">7 días D+</div>
+          </div>
+          <div class="card">
+            <div class="value">${fmt(s.last_28d?.load, 0)}</div>
+            <div class="label">28 días carga</div>
+          </div>
+          <div class="card">
+            <div class="value">${fmt(s.last_28d?.distance_km, 1)}</div>
+            <div class="label">28 días km</div>
+          </div>
+          <div class="card">
+            <div class="value">${fmtInt(s.last_28d?.ascent_m)}</div>
+            <div class="label">28 días D+</div>
+          </div>
+          <div class="card">
+            <div class="value">${ftpPace}</div>
+            <div class="label">FTPa<br><span class="muted">${thresholds.ftp_pace_mps?.valid_from || ''}</span></div>
+          </div>
+          <div class="card">
+            <div class="value">${lthr}</div>
+            <div class="label">LTHR<br><span class="muted">${thresholds.lthr_bpm?.valid_from || ''}</span></div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function renderPmc() {
+      const data = await fetch('/v1/pmc?from_date=2025-03-29').then(r => r.json());
+      if (!pmcChart) pmcChart = echarts.init(document.getElementById('pmc'));
+      const dates = data.map(d => d.date);
+      pmcChart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['CTL (fitness)', 'ATL (fatiga)', 'TSB (forma)'], textStyle: { color: '#cbd5e1' }, bottom: 0 },
+        grid: { left: 50, right: 50, top: 40, bottom: 70 },
+        dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: 25, height: 20 }],
+        xAxis: { type: 'category', data: dates, axisLine: { lineStyle: { color: '#94a3b8' } } },
+        yAxis: [
+          { type: 'value', name: 'CTL/ATL', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { lineStyle: { color: '#334155' } } },
+          { type: 'value', name: 'TSB', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { show: false } }
+        ],
+        series: [
+          { name: 'CTL (fitness)', type: 'line', data: data.map(d => d.ctl), showSymbol: false, lineStyle: { color: '#22c55e', width: 2 } },
+          { name: 'ATL (fatiga)', type: 'line', data: data.map(d => d.atl), showSymbol: false, lineStyle: { color: '#ef4444', width: 2 } },
+          { name: 'TSB (forma)', type: 'line', data: data.map(d => d.tsb), showSymbol: false, yAxisIndex: 1, lineStyle: { color: '#3b82f6', width: 2 },
+            markLine: { silent: true, data: [{ yAxis: 0, lineStyle: { color: '#94a3b8', type: 'dashed' } }] },
+            markArea: {
+              silent: true,
+              data: [
+                [{ yAxis: 25 }, { yAxis: 'max', itemStyle: { color: 'rgba(34,197,94,0.08)' } }],
+                [{ yAxis: 'min' }, { yAxis: -10, itemStyle: { color: 'rgba(239,68,68,0.08)' } }]
+              ]
+            }
+          }
+        ]
+      }, true);
+    }
+
+    async function renderWeeklyLoad() {
+      const data = await fetch('/v1/weekly-load?weeks=52').then(r => r.json());
+      if (!weeklyLoadChart) weeklyLoadChart = echarts.init(document.getElementById('weekly-load'));
+      weeklyLoadChart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['Carga (TSS)', 'Distancia (km)'], textStyle: { color: '#cbd5e1' }, bottom: 0 },
+        grid: { left: 50, right: 50, top: 40, bottom: 60 },
+        xAxis: { type: 'category', data: data.map(d => d.week), axisLine: { lineStyle: { color: '#94a3b8' } } },
+        yAxis: [
+          { type: 'value', name: 'Carga', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { lineStyle: { color: '#334155' } } },
+          { type: 'value', name: 'km', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { show: false } }
+        ],
+        series: [
+          { name: 'Carga (TSS)', type: 'bar', data: data.map(d => d.load), itemStyle: { color: '#3b82f6' }, yAxisIndex: 0 },
+          { name: 'Distancia (km)', type: 'line', data: data.map(d => d.distance_km), lineStyle: { color: '#22c55e' }, yAxisIndex: 1, showSymbol: false }
+        ]
+      }, true);
+    }
+
+    async function renderWeeklyVolume() {
+      const data = await fetch('/v1/weekly-volume?weeks=52').then(r => r.json());
+      if (!weeklyVolChart) weeklyVolChart = echarts.init(document.getElementById('weekly-volume'));
+      weeklyVolChart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['Distancia (km)', 'Tiempo (h)', 'D+ (m)'], textStyle: { color: '#cbd5e1' }, bottom: 0 },
+        grid: { left: 50, right: 70, top: 40, bottom: 60 },
+        xAxis: { type: 'category', data: data.map(d => d.week), axisLine: { lineStyle: { color: '#94a3b8' } } },
+        yAxis: [
+          { type: 'value', name: 'km / h', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { lineStyle: { color: '#334155' } } },
+          { type: 'value', name: 'm D+', position: 'right', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { show: false } }
+        ],
+        series: [
+          { name: 'Distancia (km)', type: 'bar', data: data.map(d => d.distance_km), itemStyle: { color: '#3b82f6' } },
+          { name: 'Tiempo (h)', type: 'line', data: data.map(d => d.duration_h), lineStyle: { color: '#f59e0b' }, showSymbol: false },
+          { name: 'D+ (m)', type: 'line', data: data.map(d => d.ascent_m), lineStyle: { color: '#22c55e' }, showSymbol: false, yAxisIndex: 1 }
+        ]
+      }, true);
+    }
+
+    async function renderThresholds() {
+      const rows = await fetch('/v1/athlete-thresholds').then(r => r.json());
+      if (!thresholdsChart) thresholdsChart = echarts.init(document.getElementById('thresholds'));
+      const allDates = Array.from(new Set(rows.map(r => r.valid_from))).sort();
+      const kindMap = {};
+      rows.forEach(r => {
+        if (!kindMap[r.kind]) kindMap[r.kind] = {};
+        kindMap[r.kind][r.valid_from] = r.value;
+      });
+      const paceKinds = ['ftp_pace_mps'];
+      const hrKinds = ['lthr_bpm', 'hr_max_bpm', 'resting_hr_bpm'];
+      const hrColors = { lthr_bpm: '#ef4444', hr_max_bpm: '#f97316', resting_hr_bpm: '#22c55e' };
+      const hrNames = { lthr_bpm: 'LTHR', hr_max_bpm: 'HRmax', resting_hr_bpm: 'HRrest' };
+      const paceSeries = paceKinds.map(kind => ({
+        name: 'FTPa (min/km)', type: 'line', yAxisIndex: 0,
+        data: allDates.map(d => { const v = kindMap[kind]?.[d]; return v == null ? null : 16.6666667 / v; }),
+        lineStyle: { color: '#f59e0b', width: 2 }, symbol: 'circle', symbolSize: 8
+      }));
+      const hrSeries = [];
+      hrKinds.forEach(kind => {
+        const data = allDates.map(d => kindMap[kind]?.[d] ?? null);
+        if (data.some(v => v != null)) hrSeries.push({
+          name: hrNames[kind] + ' (bpm)', type: 'line', yAxisIndex: 1,
+          data, lineStyle: { color: hrColors[kind], width: 2 }, symbol: 'circle', symbolSize: 6
+        });
+      });
+      thresholdsChart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis', formatter: p => {
+          return p.map(s => {
+            const v = s.value;
+            if (v == null) return `${s.marker} ${s.seriesName}: -`;
+            return `${s.marker} ${s.seriesName}: ${s.seriesName.includes('min/km') ? fmtPace(v) : fmt(v,0)}`;
+          }).join('<br>');
+        }},
+        legend: { data: paceSeries.concat(hrSeries).map(s => s.name), textStyle: { color: '#cbd5e1' }, bottom: 0 },
+        grid: { left: 60, right: 60, top: 40, bottom: 70 },
+        xAxis: { type: 'category', data: allDates, axisLine: { lineStyle: { color: '#94a3b8' } }, axisLabel: { rotate: 30, color: '#94a3b8' } },
+        yAxis: [
+          { type: 'value', name: 'Ritmo (min/km)', axisLabel: { formatter: v => fmtPace(v) }, axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { lineStyle: { color: '#334155' } }, inverse: true },
+          { type: 'value', name: 'FC (bpm)', position: 'right', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { show: false } }
+        ],
+        series: [...paceSeries, ...hrSeries]
+      }, true);
+    }
+
+    // --- Activity tab ---
+    let activityTimeseries = null;
+    let selectedChannels = new Set(['altitude_m', 'hr_bpm', 'pace_min_km', 'grade_pct']);
+    let currentActivityId = null;
 
     async function loadActivities() {
-      const res = await fetch('/v1/activities?limit=50');
-      const data = await res.json();
+      const data = await fetch('/v1/activities?limit=50').then(r => r.json());
       const container = document.getElementById('activities');
       container.innerHTML = '';
       data.forEach(a => {
         const el = document.createElement('div');
         el.className = 'activity';
         el.dataset.id = a.id;
-        el.innerHTML = `<div><strong>${a.start_time_utc ? a.start_time_utc.split('T')[0] : '?'}</strong> — ${a.sport}</div>
-          <div class="muted">${a.distance_km} km · ${a.duration_min} min · ${a.ascent_m} m D+</div>`;
+        el.innerHTML = `<div><strong>${fmtDate(a.start_time_utc)}</strong> — ${a.sport}</div>
+          <div class="muted">${a.distance_km} km · ${a.duration_min} min · ${a.ascent_m} m D+ · ${a.data_quality}</div>`;
         el.addEventListener('click', () => selectActivity(a.id, el));
         container.appendChild(el);
       });
       if (data[0]) selectActivity(data[0].id, container.firstElementChild);
     }
 
-    let profileChart, weeklyChart;
-
     async function selectActivity(id, el) {
       document.querySelectorAll('.activity').forEach(e => e.classList.remove('active'));
       if (el) el.classList.add('active');
+      currentActivityId = id;
 
       const [detail, series] = await Promise.all([
         fetch(`/v1/activities/${id}`).then(r => r.json()),
-        fetch(`/v1/activities/${id}/timeseries?channels=altitude_m,hr_bpm,speed_mps&max_points=800`).then(r => r.json())
+        fetch(`/v1/activities/${id}/timeseries?max_points=2000`).then(r => r.json())
       ]);
 
       document.getElementById('detail-content').innerHTML = `
-        <div class="metric"><span class="muted">Distancia</span><br>${fmt(detail.distance_km)} km</div>
-        <div class="metric"><span class="muted">Tiempo</span><br>${fmt(detail.duration_min)} min</div>
-        <div class="metric"><span class="muted">D+ / D-</span><br>${fmt(detail.ascent_m)} / ${fmt(detail.descent_m)} m</div>
-        <div class="metric"><span class="muted">HR media / máx</span><br>${detail.avg_hr} / ${detail.max_hr} bpm</div>
-        <div class="metric"><span class="muted">Calidad</span><br>${detail.data_quality}</div>
-        <div class="muted" style="margin-top:0.5rem">${detail.quality_flags?.length ? 'Flags: ' + detail.quality_flags.join(', ') : ''}</div>
+        <div class="cards" style="margin-bottom:.5rem">
+          <div class="card"><div class="value">${fmt(detail.distance_km, 2)}</div><div class="label">Distancia (km)</div></div>
+          <div class="card"><div class="value">${fmt(detail.duration_min, 0)}</div><div class="label">Tiempo (min)</div></div>
+          <div class="card"><div class="value">${fmtInt(detail.ascent_m)} / ${fmtInt(detail.descent_m)}</div><div class="label">D+ / D- (m)</div></div>
+          <div class="card"><div class="value">${detail.avg_hr || '-'}</div><div class="label">HR media / máx<br>${detail.max_hr || '-'}</div></div>
+          <div class="card"><div class="value">${detail.avg_cadence || '-'}</div><div class="label">Cadencia media</div></div>
+          <div class="card"><div class="value">${detail.avg_power || '-'}</div><div class="label">Potencia media (W)</div></div>
+        </div>
+        <div class="muted">Calidad: ${detail.data_quality}${detail.quality_flags?.length ? ' · Flags: ' + detail.quality_flags.join(', ') : ''}</div>
+        ${detail.intervals?.length ? `<h3 style="margin:1rem 0 .3rem">Vueltas</h3><div class="laps-wrap"><table><thead><tr><th>Tipo</th><th>Dist</th><th>Tiempo</th><th>D+</th><th>HR</th><th>Vel</th></tr></thead><tbody>${detail.intervals.map(i => `<tr><td>${i.kind} ${i.seq}</td><td>${i.distance_km} km</td><td>${i.duration_min} min</td><td>${fmtInt(i.ascent_m)} m</td><td>${i.avg_hr || '-'}</td><td>${i.avg_speed_kmh || '-'}</td></tr>`).join('')}</tbody></table></div>` : ''}
       `;
 
-      if (!profileChart) profileChart = echarts.init(document.getElementById('profile'));
-      const t = series.data.t_s.map(ts => new Date(ts * 1000).toLocaleTimeString());
-      const opt = {
-        backgroundColor: 'transparent',
-        tooltip: { trigger: 'axis' },
-        legend: { data: ['Altitud (m)', 'HR (bpm)', 'Velocidad (km/h)'], textStyle: { color: '#cbd5e1' } },
-        grid: { left: 50, right: 50, top: 50, bottom: 30 },
-        xAxis: { type: 'category', data: t, axisLine: { lineStyle: { color: '#94a3b8' } } },
-        yAxis: [
-          { type: 'value', name: 'Altitud', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { lineStyle: { color: '#334155' } } },
-          { type: 'value', name: 'HR', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { show: false } }
-        ],
-        series: [
-          { name: 'Altitud (m)', type: 'line', data: series.data.altitude_m || [], showSymbol: false, yAxisIndex: 0, lineStyle: { color: '#22c55e' }, areaStyle: { color: 'rgba(34,197,94,0.1)' } },
-          { name: 'HR (bpm)', type: 'line', data: series.data.hr_bpm || [], showSymbol: false, yAxisIndex: 1, lineStyle: { color: '#ef4444' } },
-          { name: 'Velocidad (km/h)', type: 'line', data: (series.data.speed_mps || []).map(v => v == null ? null : v * 3.6), showSymbol: false, yAxisIndex: 0, lineStyle: { color: '#3b82f6' } }
-        ]
-      };
-      profileChart.setOption(opt, true);
+      activityTimeseries = series;
+      renderChannelSelector(series.available);
+      renderProfile();
     }
 
-    async function loadWeekly() {
-      const data = await fetch('/v1/weekly-volume?weeks=52').then(r => r.json());
-      if (!weeklyChart) weeklyChart = echarts.init(document.getElementById('weekly'));
-      weeklyChart.setOption({
-        backgroundColor: 'transparent',
-        tooltip: { trigger: 'axis' },
-        legend: { data: ['Distancia (km)', 'Tiempo (h)', 'D+ (m)'], textStyle: { color: '#cbd5e1' } },
-        grid: { left: 50, right: 50, top: 40, bottom: 30 },
-        xAxis: { type: 'category', data: data.map(d => d.week), axisLine: { lineStyle: { color: '#94a3b8' } } },
-        yAxis: [
-          { type: 'value', name: 'km/h', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { lineStyle: { color: '#334155' } } }
-        ],
-        series: [
-          { name: 'Distancia (km)', type: 'bar', data: data.map(d => d.distance_km), itemStyle: { color: '#3b82f6' } },
-          { name: 'Tiempo (h)', type: 'line', data: data.map(d => d.duration_h), lineStyle: { color: '#f59e0b' } },
-          { name: 'D+ (m)', type: 'line', data: data.map(d => d.ascent_m), lineStyle: { color: '#22c55e' } }
-        ]
-      }, true);
+    function renderChannelSelector(available) {
+      const container = document.getElementById('channel-selectors');
+      container.innerHTML = '';
+      available.filter(key => !key.startsWith('_')).forEach(key => {
+        const info = chanInfo(key);
+        const label = document.createElement('label');
+        label.innerHTML = `<input type="checkbox" value="${key}" ${selectedChannels.has(key) ? 'checked' : ''}> ${info.label}`;
+        label.querySelector('input').addEventListener('change', (e) => {
+          if (e.target.checked) selectedChannels.add(e.target.value);
+          else selectedChannels.delete(e.target.value);
+          renderProfile();
+        });
+        container.appendChild(label);
+      });
     }
 
-    async function loadAthleteState() {
-      const state = await fetch('/v1/athlete-state').then(r => r.json());
-      document.getElementById('athlete-state').innerHTML = `
-        <div class="metric"><span class="muted">Fitness (CTL)</span><br>${fmt(state.fitness?.ctl)}</div>
-        <div class="metric"><span class="muted">Fatiga (ATL)</span><br>${fmt(state.fatigue?.atl)}</div>
-        <div class="metric"><span class="muted">Forma (TSB)</span><br>${fmt(state.form?.tsb)} ${state.form?.label ? '(' + state.form.label + ')' : ''}</div>
-        <div class="metric"><span class="muted">7 días carga</span><br>${fmt(state.last_7d?.load)}</div>
-        <div class="metric"><span class="muted">7 días D+</span><br>${fmt(state.last_7d?.ascent_m)} m</div>
-        <div class="metric"><span class="muted">28 días distancia</span><br>${fmt(state.last_28d?.distance_km)} km</div>
-      `;
+    function renderProfile() {
+      const container = document.getElementById('profile-charts');
+      container.innerHTML = '';
+      if (!activityTimeseries) return;
+      const t0 = activityTimeseries.data.t_s[0] || 0;
+      const xData = activityTimeseries.data.t_s.map(ts => fmtDur(ts - t0));
+      const charts = [];
+      Array.from(selectedChannels).forEach((key, idx) => {
+        if (!activityTimeseries.data[key]) return;
+        const info = chanInfo(key);
+        let data = activityTimeseries.data[key];
+        if (info.scale) data = data.map(v => v == null ? null : v * info.scale);
+        const div = document.createElement('div');
+        div.className = 'mini-chart';
+        container.appendChild(div);
+        const chart = echarts.init(div);
+        chart.group = 'profile';
+        chart.setOption({
+          backgroundColor: 'transparent',
+          title: { text: `${info.label} (${info.unit})`, left: 0, top: 0, textStyle: { color: '#e2e8f0', fontSize: 12 } },
+          tooltip: { trigger: 'axis', formatter: p => {
+            const v = p[0].value;
+            const valStr = info.formatter ? info.formatter(v) : fmt(v, 2);
+            return `${p[0].axisValue}<br>${info.label}: ${valStr} ${info.unit}`;
+          }},
+          grid: { left: 45, right: 25, top: 28, bottom: 35 },
+          xAxis: { type: 'category', data: xData, axisLine: { lineStyle: { color: '#94a3b8' } }, axisLabel: { show: false } },
+          yAxis: { type: 'value', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { lineStyle: { color: '#334155' } }, axisLabel: { formatter: v => info.formatter ? info.formatter(v) : fmt(v, 1) } },
+          dataZoom: [{ type: 'inside' }, { type: 'slider', show: idx === 0, bottom: 0, height: 16 }],
+          series: [{
+            name: info.label, type: 'line', data, showSymbol: false,
+            lineStyle: { color: info.color }, areaStyle: info.area ? { color: info.color + '22' } : undefined
+          }]
+        });
+        charts.push(chart);
+      });
+      profileCharts = charts;
+      if (profileCharts.length) echarts.connect('profile');
+      // show x axis labels on last chart
+      if (profileCharts.length) {
+        profileCharts[profileCharts.length-1].setOption({ xAxis: { axisLabel: { show: true, color: '#94a3b8' } } });
+      }
     }
 
-    let pmcChart;
-    async function loadPmc() {
-      const data = await fetch('/v1/pmc?from_date=2025-03-29').then(r => r.json());
-      if (!pmcChart) pmcChart = echarts.init(document.getElementById('pmc'));
-      pmcChart.setOption({
-        backgroundColor: 'transparent',
-        tooltip: { trigger: 'axis' },
-        legend: { data: ['CTL (fitness)', 'ATL (fatiga)', 'TSB (forma)'], textStyle: { color: '#cbd5e1' } },
-        grid: { left: 50, right: 50, top: 50, bottom: 30 },
-        xAxis: { type: 'category', data: data.map(d => d.date), axisLine: { lineStyle: { color: '#94a3b8' } } },
-        yAxis: [
-          { type: 'value', name: 'CTL/ATL', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { lineStyle: { color: '#334155' } } },
-          { type: 'value', name: 'TSB', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { show: false } }
-        ],
-        series: [
-          { name: 'CTL (fitness)', type: 'line', data: data.map(d => d.ctl), showSymbol: false, lineStyle: { color: '#22c55e' } },
-          { name: 'ATL (fatiga)', type: 'line', data: data.map(d => d.atl), showSymbol: false, lineStyle: { color: '#ef4444' } },
-          { name: 'TSB (forma)', type: 'line', data: data.map(d => d.tsb), showSymbol: false, yAxisIndex: 1, lineStyle: { color: '#3b82f6' } }
-        ]
-      }, true);
-    }
+    window.addEventListener('resize', () => {
+      [pmcChart, weeklyLoadChart, weeklyVolChart, thresholdsChart, ...profileCharts].forEach(c => c && c.resize());
+    });
 
-    window.addEventListener('resize', () => { profileChart && profileChart.resize(); weeklyChart && weeklyChart.resize(); pmcChart && pmcChart.resize(); });
+    loadDashboard();
     loadActivities();
-    loadWeekly();
-    loadAthleteState();
-    loadPmc();
   </script>
 </body>
 </html>
