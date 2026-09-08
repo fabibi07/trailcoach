@@ -1,4 +1,4 @@
-"""FastAPI application."""
+"""Aplicación FastAPI."""
 
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
@@ -44,7 +44,7 @@ if FRONTEND_DIR.exists():
 def index():
     if FRONTEND_DIR.exists():
         return FileResponse(FRONTEND_DIR / "index.html")
-    return {"message": "TrailCoach API is running"}
+    return {"message": "API de TrailCoach en ejecución"}
 
 
 def _get_db():
@@ -65,7 +65,7 @@ def get_athlete():
     db = next(_get_db())
     athlete = db.query(Athlete).first()
     if not athlete:
-        raise HTTPException(404, "No athlete configured")
+        raise HTTPException(404, "No hay atleta configurado")
     return {
         "id": str(athlete.id),
         "display_name": athlete.display_name,
@@ -104,7 +104,7 @@ def get_activity(activity_id: UUID):
     db = next(_get_db())
     a = db.query(Activity).filter(Activity.id == activity_id).first()
     if not a:
-        raise HTTPException(404, "Activity not found")
+        raise HTTPException(404, "Actividad no encontrada")
     sources = (
         db.query(SourceActivity)
         .filter(SourceActivity.canonical_activity_id == activity_id)
@@ -170,7 +170,7 @@ def get_activity(activity_id: UUID):
 
 
 def _pace_min_km(s: pl.Series) -> pl.Series:
-    """Convert speed (m/s) to pace (min/km), capping very slow/stopped samples."""
+    """Convierte velocidad (m/s) a ritmo (min/km), limitando muestras muy lentas o paradas."""
     def _to_pace(v: float | None) -> float | None:
         if v is None or v <= 0:
             return None
@@ -186,7 +186,8 @@ def get_timeseries(
     channels: str | None = None,
     max_points: int = 2000,
 ):
-    """Return downsampled timeseries for an activity, with derived running channels."""
+    """Devuelve la serie temporal remuestreada de una actividad,
+    con canales derivados de running."""
     from trailcoach.core.config import settings
     from trailcoach.training.grade import add_grade_to_dataframe, grade_adjusted_speed
 
@@ -197,13 +198,13 @@ def get_timeseries(
         .first()
     )
     if not stream_set:
-        raise HTTPException(404, "No stream data")
+        raise HTTPException(404, "Sin datos de stream")
     path = settings.processed_root_path / stream_set.storage_path
     if not path.exists():
-        raise HTTPException(404, "Parquet file missing")
+        raise HTTPException(404, "Falta el archivo Parquet")
     df = pl.read_parquet(path)
 
-    # Derive grade and grade-adjusted speed/pace on demand.
+    # Deriva pendiente y velocidad/ritmo ajustados por pendiente bajo demanda.
     df = add_grade_to_dataframe(df)
     if "speed_mps" in df.columns:
         gap = [
@@ -244,7 +245,7 @@ def get_timeseries(
 
 @app.get("/v1/weekly-volume")
 def weekly_volume(weeks: int = 12):
-    """Aggregated weekly volume for charts."""
+    """Volumen semanal agregado para gráficos."""
     db = next(_get_db())
     today = date.today()
     start = datetime.combine(today - timedelta(weeks=weeks), datetime.min.time())
@@ -263,7 +264,7 @@ def weekly_volume(weeks: int = 12):
     for a in activities:
         if a.start_time_utc is None:
             continue
-        # ISO calendar week: YYYY-WNN
+        # Semana ISO: AAAA-SNN
         y, w, _ = a.start_time_utc.isocalendar()
         key = f"{y}-W{w:02d}"
         weeks_agg[key]["duration_s"] += float(a.duration_elapsed_s) if a.duration_elapsed_s else 0
@@ -284,7 +285,7 @@ def weekly_volume(weeks: int = 12):
 
 @app.get("/v1/pmc")
 def get_pmc(from_date: date | None = None, to_date: date | None = None):
-    """Performance Management Chart data (CTL/ATL/TSB)."""
+    """Datos del PMC (CTL/ATL/TSB)."""
     db = next(_get_db())
     q = db.query(TrainingMetricDaily).order_by(TrainingMetricDaily.date)
     if from_date:
@@ -308,11 +309,11 @@ def get_pmc(from_date: date | None = None, to_date: date | None = None):
 
 @app.get("/v1/athlete-state")
 def athlete_state():
-    """Summarised athlete state for the AI Coach and dashboard."""
+    """Estado resumido del atleta para el AI Coach y el dashboard."""
     with get_db() as db:
         athlete = db.query(Athlete).first()
         if athlete is None:
-            raise HTTPException(404, "No athlete configured")
+            raise HTTPException(404, "No hay atleta configurado")
         return build_athlete_state(db, athlete)
 
 
@@ -323,21 +324,21 @@ class AskRequest(BaseModel):
 
 @app.post("/v1/ask")
 def ask_question(req: AskRequest):
-    """Ask the AI coach a question based on the Athlete State."""
+    """Pregunta al AI Coach basándote en el Estado del Atleta."""
     with get_db() as db:
         athlete = db.query(Athlete).first()
         if athlete is None:
-            raise HTTPException(404, "No athlete configured")
+            raise HTTPException(404, "No hay atleta configurado")
         return ask_coach(db, athlete, req.question, req.provider)
 
 
 @app.get("/v1/athlete-thresholds")
 def list_thresholds():
-    """Return the versioned threshold history for the configured athlete."""
+    """Devuelve el historial versionado de umbrales del atleta configurado."""
     db = next(_get_db())
     athlete = db.query(Athlete).first()
     if not athlete:
-        raise HTTPException(404, "No athlete configured")
+        raise HTTPException(404, "No hay atleta configurado")
     rows = (
         db.query(AthleteThreshold)
         .filter(AthleteThreshold.athlete_id == athlete.id)
@@ -359,14 +360,14 @@ def list_thresholds():
 
 @app.get("/v1/weekly-load")
 def weekly_load(weeks: int = 12):
-    """Aggregated weekly load/volume from DailyLoad for charts."""
+    """Carga semanal agregada desde DailyLoad para gráficos."""
     from collections import defaultdict
     from typing import Any
 
     db = next(_get_db())
     athlete = db.query(Athlete).first()
     if not athlete:
-        raise HTTPException(404, "No athlete configured")
+        raise HTTPException(404, "No hay atleta configurado")
     today = date.today()
     start = today - timedelta(weeks=weeks)
     rows = (

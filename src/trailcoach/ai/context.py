@@ -1,8 +1,9 @@
-"""Build the `Athlete State` context consumed by the AI Coach.
+"""Construye el contexto `Estado del Atleta` consumido por el AI Coach.
 
-The context is deliberately summarised: it contains fitness/fatigue/form,
-load/volume trends, recent activity summaries and threshold evolution. It does
-NOT contain raw FIT files, stream arrays or per-sample telemetry.
+El contexto está deliberadamente resumido: contiene fitness/fatiga/forma,
+tendencias de carga/volumen, resúmenes de actividades recientes y evolución
+de umbrales. NO contiene archivos FIT crudos, arrays de streams ni telemetría
+por muestra.
 """
 
 from __future__ import annotations
@@ -217,7 +218,7 @@ def build_athlete_state(
     athlete: Athlete,
     as_of: date | None = None,
 ) -> dict[str, Any]:
-    """Return a structured, LLM-ready Athlete State context."""
+    """Devuelve un contexto estructurado `Estado del Atleta` listo para el LLM."""
     today = as_of or date.today()
     week_start = today - timedelta(days=7)
     month_start = today - timedelta(days=28)
@@ -299,15 +300,15 @@ def build_athlete_state(
         },
         "fitness": {
             "ctl": _round_if(current.ctl) if current else None,
-            "label": "fitness",
+            "label": "forma",
         },
         "fatigue": {
             "atl": _round_if(current.atl) if current else None,
-            "label": "fatigue",
+            "label": "fatiga",
         },
         "form": {
             "tsb": _round_if(current.tsb) if current else None,
-            "label": _tsb_label(current.tsb) if current else "unknown",
+            "label": _tsb_label(current.tsb) if current else "desconocido",
         },
         "ramp_rate_7d": _round_if(current.ramp_rate_7d) if current else None,
         "monotony_7d": _round_if(current.monotony_7d) if current else None,
@@ -327,54 +328,54 @@ def build_athlete_state(
 
 def _tsb_label(tsb: float | None) -> str:
     if tsb is None:
-        return "unknown"
+        return "desconocido"
     if tsb > 25:
-        return "very high"
+        return "muy alta"
     if tsb > 10:
-        return "high"
+        return "alta"
     if tsb < -30:
-        return "very low"
+        return "muy baja"
     if tsb < -10:
-        return "low"
+        return "baja"
     return "neutral"
 
 
 def _summary_text(state: dict[str, Any]) -> str:
     parts: list[str] = []
     a = state["athlete"]
-    name = a.get("display_name") or "Athlete"
+    name = a.get("display_name") or "Atleta"
     fitness = state["fitness"]["ctl"]
     fatigue = state["fatigue"]["atl"]
     form = state["form"]["tsb"]
     form_label = state["form"]["label"]
     parts.append(
-        f"{name} is in {form_label} form (CTL {fitness}, ATL {fatigue}, TSB {form})."
+        f"Forma de {name}: {form_label} (CTL {fitness}, ATL {fatigue}, TSB {form})."
     )
 
     last_7 = state["last_7d"]
     if last_7["n_activities"]:
         parts.append(
-            f"Last 7 days: {last_7['n_activities']} activities, "
+            f"Últimos 7 días: {last_7['n_activities']} actividades, "
             f"{last_7['distance_km']} km, {last_7['ascent_m']} m D+, "
-            f"load {last_7['load']}."
+            f"carga {last_7['load']}."
         )
     else:
-        parts.append("No activities in the last 7 days.")
+        parts.append("Sin actividades en los últimos 7 días.")
 
     trend = state["trends"]["ctl"]
     if trend["direction"] == "up":
-        parts.append(f"Fitness is rising ({trend['change_pct']}% vs last week).")
+        parts.append(f"El CTL está subiendo ({trend['change_pct']}% vs la semana pasada).")
     elif trend["direction"] == "down":
-        parts.append(f"Fitness is declining ({trend['change_pct']}% vs last week).")
+        parts.append(f"El CTL está bajando ({trend['change_pct']}% vs la semana pasada).")
     else:
-        parts.append("Fitness is stable.")
+        parts.append("El CTL es estable.")
 
     recent = state["recent_activities"]
     if recent:
         last = recent[0]
         parts.append(
-            f"Most recent activity: {last['date']} {last['sport']} "
-            f"{last['distance_km']} km in {last['duration_min']} min "
+            f"Actividad más reciente: {last['date']} {last['sport']} "
+            f"{last['distance_km']} km en {last['duration_min']} min "
             f"({last['pace_str']} min/km), {last['ascent_m']} m D+."
         )
 

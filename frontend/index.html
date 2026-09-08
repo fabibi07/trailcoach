@@ -146,10 +146,10 @@
     function fmtDate(iso) { return iso ? new Date(iso).toLocaleDateString('es-CL') : '-'; }
 
     const tsbClass = (label) => {
-      if (label === 'very high') return 'tag-blue';
-      if (label === 'high') return 'tag-green';
-      if (label === 'low') return 'tag-yellow';
-      if (label === 'very low') return 'tag-red';
+      if (label === 'muy alta') return 'tag-blue';
+      if (label === 'alta') return 'tag-green';
+      if (label === 'baja') return 'tag-yellow';
+      if (label === 'muy baja') return 'tag-red';
       return 'tag';
     };
 
@@ -383,7 +383,7 @@
         };
         const res = await fetch('/v1/ask', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
         const data = await res.json();
-        answerEl.textContent = data.answer ? data.answer : `(${data.dry_run ? 'dry-run' : 'error'}${data.error ? ': ' + data.error : ''})\n\nConfigura OPENAI_API_KEY o ANTHROPIC_API_KEY para obtener una respuesta real.`;
+        answerEl.textContent = data.answer ? data.answer : `(${data.dry_run ? 'modo dry-run' : 'error'}${data.error ? ': ' + data.error : ''})\n\nConfigura OPENAI_API_KEY o ANTHROPIC_API_KEY para obtener una respuesta real.`;
         document.getElementById('coach-prompt').textContent = data.prompt || '';
       });
     }
@@ -391,10 +391,12 @@
     function renderCoachContext(s) {
       const recent = (s.recent_activities || []).slice(0,3);
       const trends = s.trends || {};
+      const dirMap = { up: 'subiendo', down: 'bajando', flat: 'estable' };
       const trendText = (k) => {
         const t = trends[k];
         if (!t) return '-';
-        return `${t.direction} (${t.change_pct != null ? (t.change_pct > 0 ? '+' : '') + t.change_pct + '%' : '-'} vs semana anterior)`;
+        const direction = dirMap[t.direction] || t.direction;
+        return `${direction} (${t.change_pct != null ? (t.change_pct > 0 ? '+' : '') + t.change_pct + '%' : '-'} vs semana anterior)`;
       };
       document.getElementById('coach-context').innerHTML = `
         <p class="muted" style="margin-bottom:1rem">${s.summary || ''}</p>

@@ -1,4 +1,4 @@
-"""AI Coach module: build Athlete State context and answer questions."""
+"""Módulo AI Coach: construye el contexto del Estado del Atleta y responde preguntas."""
 
 from trailcoach.ai.coach import ask
 from trailcoach.ai.context import build_athlete_state

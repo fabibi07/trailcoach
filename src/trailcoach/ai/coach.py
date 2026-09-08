@@ -1,4 +1,4 @@
-"""AI Coach execution layer."""
+"""Capa de ejecución del AI Coach."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def _call_openai(prompt: str, api_key: str, model: str) -> dict[str, Any]:
     except httpx.HTTPError as exc:
         return {
             "answer": None,
-            "error": f"OpenAI request failed: {exc}",
+            "error": f"Falló la petición a OpenAI: {exc}",
             "provider": "openai",
         }
 
@@ -78,7 +78,7 @@ def _call_anthropic(prompt: str, api_key: str, model: str) -> dict[str, Any]:
     except httpx.HTTPError as exc:
         return {
             "answer": None,
-            "error": f"Anthropic request failed: {exc}",
+            "error": f"Falló la petición a Anthropic: {exc}",
             "provider": "anthropic",
         }
 
@@ -89,10 +89,10 @@ def ask(
     question: str,
     provider: str | None = None,
 ) -> dict[str, Any]:
-    """Build context and ask the configured LLM coach.
+    """Construye el contexto y consulta al entrenador LLM configurado.
 
-    If no API key is configured, returns the prompt/context in dry-run mode
-    so the caller can inspect what would be sent to the LLM.
+    Si no hay una API key configurada, devuelve el prompt/contexto en modo
+    dry-run para que quien llama pueda inspeccionar lo que se enviaría al LLM.
     """
     context = build_athlete_state(db, athlete)
     prompt = build_prompt(question, context)
@@ -116,7 +116,7 @@ def ask(
             "model": model,
             "dry_run": True,
             "answer": None,
-            "error": f"Unknown provider: {chosen}",
+            "error": f"Proveedor desconocido: {chosen}",
         }
 
     if not api_key:
@@ -128,7 +128,7 @@ def ask(
             "model": model,
             "dry_run": True,
             "answer": None,
-            "error": f"No API key configured for provider: {chosen}",
+            "error": f"No hay una API key configurada para el proveedor: {chosen}",
         }
 
     result = caller(prompt, api_key, model)
