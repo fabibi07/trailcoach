@@ -17,17 +17,22 @@
     .muted { color: #94a3b8; font-size: 0.85rem; }
     #profile { width: 100%; height: 420px; }
     #weekly { width: 100%; height: 280px; }
+    #pmc { width: 100%; height: 340px; }
     .metric { display: inline-block; margin-right: 1rem; }
   </style>
 </head>
 <body>
-  <h1>TrailCoach <span class="muted">Fase 0 — FIT local</span></h1>
+  <h1>TrailCoach <span class="muted">Fase 1 — Training Engine</span></h1>
   <div class="grid">
     <div class="panel">
       <h2>Actividades</h2>
       <div id="activities"></div>
     </div>
     <div>
+      <div class="panel" id="athlete-state-panel">
+        <h2>Estado del atleta</h2>
+        <div id="athlete-state">Cargando...</div>
+      </div>
       <div class="panel" id="detail">
         <h2>Detalle</h2>
         <div id="detail-content">Selecciona una actividad.</div>
@@ -35,6 +40,10 @@
       <div class="panel">
         <h2>Perfil de actividad</h2>
         <div id="profile"></div>
+      </div>
+      <div class="panel">
+        <h2>PMC (CTL / ATL / TSB)</h2>
+        <div id="pmc"></div>
       </div>
       <div class="panel">
         <h2>Volumen semanal</h2>
@@ -124,9 +133,45 @@
       }, true);
     }
 
-    window.addEventListener('resize', () => { profileChart && profileChart.resize(); weeklyChart && weeklyChart.resize(); });
+    async function loadAthleteState() {
+      const state = await fetch('/v1/athlete-state').then(r => r.json());
+      document.getElementById('athlete-state').innerHTML = `
+        <div class="metric"><span class="muted">Fitness (CTL)</span><br>${fmt(state.fitness?.ctl)}</div>
+        <div class="metric"><span class="muted">Fatiga (ATL)</span><br>${fmt(state.fatigue?.atl)}</div>
+        <div class="metric"><span class="muted">Forma (TSB)</span><br>${fmt(state.form?.tsb)} ${state.form?.label ? '(' + state.form.label + ')' : ''}</div>
+        <div class="metric"><span class="muted">7 días carga</span><br>${fmt(state.last_7d?.load)}</div>
+        <div class="metric"><span class="muted">7 días D+</span><br>${fmt(state.last_7d?.ascent_m)} m</div>
+        <div class="metric"><span class="muted">28 días distancia</span><br>${fmt(state.last_28d?.distance_km)} km</div>
+      `;
+    }
+
+    let pmcChart;
+    async function loadPmc() {
+      const data = await fetch('/v1/pmc?from_date=2025-03-29').then(r => r.json());
+      if (!pmcChart) pmcChart = echarts.init(document.getElementById('pmc'));
+      pmcChart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['CTL (fitness)', 'ATL (fatiga)', 'TSB (forma)'], textStyle: { color: '#cbd5e1' } },
+        grid: { left: 50, right: 50, top: 50, bottom: 30 },
+        xAxis: { type: 'category', data: data.map(d => d.date), axisLine: { lineStyle: { color: '#94a3b8' } } },
+        yAxis: [
+          { type: 'value', name: 'CTL/ATL', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { lineStyle: { color: '#334155' } } },
+          { type: 'value', name: 'TSB', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { show: false } }
+        ],
+        series: [
+          { name: 'CTL (fitness)', type: 'line', data: data.map(d => d.ctl), showSymbol: false, lineStyle: { color: '#22c55e' } },
+          { name: 'ATL (fatiga)', type: 'line', data: data.map(d => d.atl), showSymbol: false, lineStyle: { color: '#ef4444' } },
+          { name: 'TSB (forma)', type: 'line', data: data.map(d => d.tsb), showSymbol: false, yAxisIndex: 1, lineStyle: { color: '#3b82f6' } }
+        ]
+      }, true);
+    }
+
+    window.addEventListener('resize', () => { profileChart && profileChart.resize(); weeklyChart && weeklyChart.resize(); pmcChart && pmcChart.resize(); });
     loadActivities();
     loadWeekly();
+    loadAthleteState();
+    loadPmc();
   </script>
 </body>
 </html>

@@ -16,10 +16,12 @@ from trailcoach.db.models import (
     ActivityStreamChannel,
     ActivityStreamSet,
     Athlete,
+    DailyLoad,
     SourceActivity,
     TrainingMetricDaily,
 )
-from trailcoach.db.session import SessionLocal
+from trailcoach.db.session import SessionLocal, get_db
+from trailcoach.training.thresholds import get_thresholds
 
 
 @asynccontextmanager
@@ -253,7 +255,94 @@ def get_pmc(from_date: date | None = None, to_date: date | None = None):
             "ctl": r.ctl,
             "atl": r.atl,
             "tsb": r.tsb,
+            "ctl_ascent": r.ctl_ascent,
+            "atl_ascent": r.atl_ascent,
             "is_stale": r.is_stale,
         }
         for r in rows
     ]
+
+
+def _tsb_label(tsb: float | None) -> str:
+    if tsb is None:
+        return "unknown"
+    if tsb > 25:
+        return "very high"
+    if tsb > 10:
+        return "high"
+    if tsb < -30:
+        return "very low"
+    if tsb < -10:
+        return "low"
+    return "neutral"
+
+
+@app.get("/v1/athlete-state")
+def athlete_state():
+    """Summarised athlete state for the AI Coach."""
+    with get_db() as db:
+        athlete = db.query(Athlete).first()
+        if athlete is None:
+            raise HTTPException(404, "No athlete configured")
+
+        today = date.today()
+        week_start = today - timedelta(days=7)
+        month_start = today - timedelta(days=28)
+
+        pmc = (
+            db.query(TrainingMetricDaily)
+            .filter(
+                TrainingMetricDaily.athlete_id == athlete.id,
+                TrainingMetricDaily.date <= today,
+            )
+            .order_by(TrainingMetricDaily.date.desc())
+            .first()
+        )
+
+        def _aggregate(start: date):
+            rows = (
+                db.query(DailyLoad)
+                .filter(
+                    DailyLoad.athlete_id == athlete.id,
+                    DailyLoad.date >= start,
+                    DailyLoad.date <= today,
+                )
+                .all()
+            )
+            return {
+                "load": round(sum(float(r.load_primary or 0) for r in rows), 2),
+                "duration_h": round(sum(float(r.duration_s or 0) for r in rows) / 3600, 2),
+                "distance_km": round(sum(float(r.distance_m or 0) for r in rows) / 1000, 2),
+                "ascent_m": round(sum(float(r.ascent_m or 0) for r in rows), 2),
+                "n_activities": sum(r.n_activities for r in rows),
+            }
+
+        thresholds = get_thresholds(db, athlete.id, today)
+
+        return {
+            "as_of": today.isoformat(),
+            "athlete": {
+                "id": str(athlete.id),
+                "display_name": athlete.display_name,
+                "sex": athlete.sex,
+            },
+            "fitness": {"ctl": pmc.ctl, "label": "fitness"} if pmc else None,
+            "fatigue": {"atl": pmc.atl, "label": "fatigue"} if pmc else None,
+            "form": {
+                "tsb": pmc.tsb,
+                "label": _tsb_label(pmc.tsb),
+            }
+            if pmc
+            else None,
+            "last_7d": _aggregate(week_start),
+            "last_28d": _aggregate(month_start),
+            "thresholds_active": {
+                kind: {
+                    "value": float(t.value),
+                    "unit": t.unit,
+                    "valid_from": t.valid_from.isoformat(),
+                    "source": t.source,
+                }
+                for kind, t in thresholds.items()
+            },
+        }
