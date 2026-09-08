@@ -29,6 +29,12 @@ class Settings(BaseSettings):
 
     encryption_key: bytes | None = Field(default=None, alias="ENCRYPTION_KEY")
 
+    # AI Coach / LLM settings
+    ai_provider: str = Field(default="openai", alias="AI_PROVIDER")
+    ai_model: str = Field(default="gpt-4o-mini", alias="AI_MODEL")
+    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
