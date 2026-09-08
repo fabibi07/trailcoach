@@ -41,13 +41,17 @@
     .tag-yellow { background:#f59e0b33; color:var(--warn); }
     .tag-red { background:#ef444433; color:var(--danger); }
     .tag-blue { background:#3b82f633; color:var(--accent); }
+    #coach-form input, #coach-form select { background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: .25rem; padding: .5rem; }
+    #coach-answer { white-space: pre-wrap; min-height: 120px; background: #0f172a; border-radius: .5rem; padding: 1rem; }
+    #coach-prompt { font-size: .75rem; overflow: auto; max-height: 300px; background: #0f172a; border-radius: .5rem; padding: .75rem; }
   </style>
 </head>
 <body>
-  <h1>TrailCoach <span class="muted">Fase 2 — Training Engine + UI</span></h1>
+  <h1>TrailCoach <span class="muted">Fase 3 — AI Coach</span></h1>
   <div class="tabs">
     <button class="tab active" data-tab="dashboard">Resumen</button>
     <button class="tab" data-tab="activity">Actividad</button>
+    <button class="tab" data-tab="coach">Coach</button>
   </div>
 
   <div id="dashboard" class="tab-content active">
@@ -93,6 +97,32 @@
           <div class="selectors" id="channel-selectors"></div>
           <div id="profile-charts"></div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="coach" class="tab-content">
+    <div class="two-col">
+      <div class="panel" style="max-height:85vh; overflow:auto;">
+        <h2>Contexto del atleta</h2>
+        <div id="coach-context">Cargando...</div>
+      </div>
+      <div class="panel" style="max-height:85vh; overflow:auto;">
+        <h2>AI Coach</h2>
+        <form id="coach-form" style="display:flex; gap:.5rem; margin-bottom:1rem; flex-wrap:wrap;">
+          <input id="coach-question" type="text" placeholder="Ej: ¿Cómo debería entrenar esta semana?" style="flex:1; min-width:220px;" required>
+          <select id="coach-provider">
+            <option value="">Auto</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+          </select>
+          <button type="submit" style="background:var(--accent); color:#fff; border:none; border-radius:.25rem; padding:.5rem 1rem; cursor:pointer;">Preguntar</button>
+        </form>
+        <div id="coach-answer">Haz una pregunta para ver la respuesta.</div>
+        <details style="margin-top:1rem;">
+          <summary>Ver contexto/prompt enviado</summary>
+          <pre id="coach-prompt"></pre>
+        </details>
       </div>
     </div>
   </div>
@@ -339,6 +369,49 @@
       }, true);
     }
 
+    // --- Coach tab ---
+    async function loadCoach() {
+      const s = await fetch('/v1/athlete-state').then(r => r.json());
+      renderCoachContext(s);
+      document.getElementById('coach-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const answerEl = document.getElementById('coach-answer');
+        answerEl.textContent = 'Pensando...';
+        const payload = {
+          question: document.getElementById('coach-question').value,
+          provider: document.getElementById('coach-provider').value || null
+        };
+        const res = await fetch('/v1/ask', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        const data = await res.json();
+        answerEl.textContent = data.answer ? data.answer : `(${data.dry_run ? 'dry-run' : 'error'}${data.error ? ': ' + data.error : ''})\n\nConfigura OPENAI_API_KEY o ANTHROPIC_API_KEY para obtener una respuesta real.`;
+        document.getElementById('coach-prompt').textContent = data.prompt || '';
+      });
+    }
+
+    function renderCoachContext(s) {
+      const recent = (s.recent_activities || []).slice(0,3);
+      const trends = s.trends || {};
+      const trendText = (k) => {
+        const t = trends[k];
+        if (!t) return '-';
+        return `${t.direction} (${t.change_pct != null ? (t.change_pct > 0 ? '+' : '') + t.change_pct + '%' : '-'} vs semana anterior)`;
+      };
+      document.getElementById('coach-context').innerHTML = `
+        <p class="muted" style="margin-bottom:1rem">${s.summary || ''}</p>
+        <div class="cards">
+          <div class="card"><div class="value">${fmt(s.fitness?.ctl,1)}</div><div class="label">Fitness (CTL)</div></div>
+          <div class="card"><div class="value">${fmt(s.fatigue?.atl,1)}</div><div class="label">Fatiga (ATL)</div></div>
+          <div class="card"><div class="value">${fmt(s.form?.tsb,1)}</div><div class="label">Forma (TSB)</div></div>
+          <div class="card"><div class="value">${trendText('ctl')}</div><div class="label">Tendencia CTL</div></div>
+          <div class="card"><div class="value">${fmt(s.last_7d?.load,0)}</div><div class="label">Carga 7d</div></div>
+          <div class="card"><div class="value">${fmt(s.last_7d?.distance_km,1)} km</div><div class="label">Volumen 7d</div></div>
+          <div class="card"><div class="value">${fmtInt(s.last_7d?.ascent_m)} m</div><div class="label">Desnivel 7d</div></div>
+        </div>
+        <h3 style="margin:1rem 0 .5rem;font-size:1rem;">Actividades recientes</h3>
+        ${recent.length ? `<ul style="list-style:none;padding:0;margin:0">${recent.map(a => `<li style="padding:.4rem 0;border-bottom:1px solid #334155"><strong>${fmtDate(a.date)}</strong> ${a.sport} — ${a.distance_km} km, ${a.pace_str} min/km, ${a.ascent_m} m D+</li>`).join('')}</ul>` : '<p class="muted">Sin actividades recientes</p>'}
+      `;
+    }
+
     // --- Activity tab ---
     let activityTimeseries = null;
     let selectedChannels = new Set(['altitude_m', 'hr_bpm', 'pace_min_km', 'grade_pct']);
@@ -454,6 +527,7 @@
 
     loadDashboard();
     loadActivities();
+    loadCoach();
   </script>
 </body>
 </html>
