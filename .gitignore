@@ -1,0 +1,38 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Environment & secrets
+.env
+*.env
+*.pem
+*.key
+
+# Local data & artifacts
+data/
+!data/.gitkeep
+*.db
+*.sqlite
+*.parquet
+*.fit
+*.gpx
+*.tcx
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
