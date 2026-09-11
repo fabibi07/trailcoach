@@ -22,6 +22,7 @@ from trailcoach.provenance import DataLineage
 from trailcoach.sources import (
     MockSourceProvider,
     SourceProviderRegistry,
+    resolve_source_for_metric,
 )
 
 
@@ -455,3 +456,69 @@ def test_raw_store_keeps_original_content(db, tmp_path):
         athlete_id=uuid.uuid4(),
     )
     assert store.read_bytes(raw) == original
+
+
+# ---------------------------------------------------------------------------
+# Dedup vs source-of-truth separation
+# ---------------------------------------------------------------------------
+def test_resolve_source_for_metric_uses_priority_list(db, athlete):
+    priority = SourcePriority(
+        athlete_id=athlete.id,
+        metric="hrv",
+        priority=["oura", "garmin_fit", "strava"],
+    )
+    db.add(priority)
+    db.commit()
+
+    # highest available source wins
+    assert resolve_source_for_metric(db, athlete.id, "hrv", ["garmin_fit", "oura"]) == "oura"
+    # unavailable higher-priority sources are skipped
+    available = ["strava", "garmin_fit"]
+    assert resolve_source_for_metric(db, athlete.id, "hrv", available) == "garmin_fit"
+    # unknown source falls back to first available
+    assert resolve_source_for_metric(db, athlete.id, "hrv", ["whoop"]) == "whoop"
+
+
+def test_dedup_source_bonus_isolated_from_metric_priority(db, athlete):
+    """Dedup must only use the 'activity' priority, not metric priorities."""
+    priority = SourcePriority(
+        athlete_id=athlete.id,
+        metric="hrv",
+        priority=["source_a", "source_b"],
+    )
+    db.add(priority)
+    existing, _ = _make_existing(db, athlete, source="source_b")
+
+    new_sa = SourceActivity(
+        athlete_id=athlete.id,
+        source="source_a",
+        source_activity_id="source_a-002",
+        start_time_utc=existing.start_time_utc,
+        sport_raw="running",
+        distance_m=existing.distance_m,
+        duration_elapsed_s=existing.duration_elapsed_s,
+    )
+
+    engine = DedupeEngine()
+    action = engine.evaluate(db, new_sa)
+    assert action.score is not None
+    # HRV priority must NOT influence activity deduplication.
+    assert action.score.source_bonus == 0.0
+
+
+def test_source_state_is_deprecated_and_unreferenced():
+    """SourceState exists only for backward compatibility; AthleteSourceAccount is canonical."""
+    import ast
+
+    import trailcoach
+
+    src_root = Path(trailcoach.__file__).parent
+    for py_path in src_root.rglob("*.py"):
+        if py_path.name == "models.py":
+            continue
+        tree = ast.parse(py_path.read_text(encoding="utf-8"), filename=str(py_path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id == "SourceState":
+                raise AssertionError(f"SourceState referenced in {py_path}:{node.lineno}")
+            if isinstance(node, ast.Attribute) and node.attr == "SourceState":
+                raise AssertionError(f"SourceState referenced in {py_path}:{node.lineno}")

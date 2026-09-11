@@ -428,11 +428,14 @@ class Job(Base):
 
 
 class SourceState(Base):
-    """Per-athlete source state kept for backward compatibility.
+    """DEPRECATED per-athlete source state kept for backward compatibility.
 
     The canonical source state for new code is `AthleteSourceAccount`.
     This table is now keyed by `(athlete_id, source)` so multiple athletes
     can share a source slug without collision.
+
+    Removal plan: once all existing consumers migrate to `AthleteSourceAccount`,
+    drop this table and delete this class. No new code should reference it.
     """
 
     __tablename__ = "source_state"
