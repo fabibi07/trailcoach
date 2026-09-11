@@ -172,9 +172,16 @@ class SourceActivity(Base):
     fit_raw_file_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("raw_file.id", ondelete="SET NULL"), nullable=True
     )
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("athlete_source_account.id", ondelete="SET NULL"), nullable=True
+    )
+    device_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("device.id", ondelete="SET NULL"), nullable=True
+    )
     status: Mapped[str] = mapped_column(String(16), default="new")
     data_quality: Mapped[str] = mapped_column(String(16), default="degraded")
     quality_flags: Mapped[list[str] | None] = mapped_column(JSON, default=list)
+    provenance: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=dict)
 
     __table_args__ = (UniqueConstraint("source", "source_activity_id"),)
 
@@ -363,7 +370,7 @@ class WellnessDaily(Base):
         Uuid, ForeignKey("athlete.id", ondelete="CASCADE"), primary_key=True
     )
     date: Mapped[date] = mapped_column(Date, primary_key=True)
-    source: Mapped[str | None] = mapped_column(String(32))
+    source: Mapped[str] = mapped_column(String(32), primary_key=True, default="unknown")
     resting_hr: Mapped[float | None] = mapped_column(Numeric(6, 2))
     hrv_status: Mapped[str | None] = mapped_column(String(16))
     hrv_ms: Mapped[float | None] = mapped_column(Numeric(8, 4))
@@ -374,6 +381,12 @@ class WellnessDaily(Base):
     training_readiness: Mapped[int | None] = mapped_column(SmallInteger)
     vo2max: Mapped[float | None] = mapped_column(Numeric(6, 2))
     weight_kg: Mapped[float | None] = mapped_column(Numeric(6, 3))
+    data_quality: Mapped[str] = mapped_column(String(16), default="authoritative")
+    quality_flags: Mapped[list[str] | None] = mapped_column(JSON, default=list)
+    provenance: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=dict)
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("athlete_source_account.id", ondelete="SET NULL"), nullable=True
+    )
     raw_file_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("raw_file.id", ondelete="SET NULL"), nullable=True
     )
@@ -415,8 +428,18 @@ class Job(Base):
 
 
 class SourceState(Base):
+    """Per-athlete source state kept for backward compatibility.
+
+    The canonical source state for new code is `AthleteSourceAccount`.
+    This table is now keyed by `(athlete_id, source)` so multiple athletes
+    can share a source slug without collision.
+    """
+
     __tablename__ = "source_state"
 
+    athlete_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("athlete.id", ondelete="CASCADE"), primary_key=True
+    )
     source: Mapped[str] = mapped_column(String(32), primary_key=True)
     health: Mapped[str] = mapped_column(String(16), default="unknown")
     auth_status: Mapped[str] = mapped_column(String(32), default="unknown")
@@ -444,7 +467,89 @@ class DedupeReview(Base):
         Uuid, ForeignKey("source_activity.id", ondelete="CASCADE"), nullable=False
     )
     candidates: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    final_score: Mapped[float | None] = mapped_column(Numeric(4, 3))
     reason: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(16), default="pending")
     resolved_by: Mapped[str | None] = mapped_column(String(64))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Platform(Base):
+    __tablename__ = "platform"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    slug: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    is_aggregator: Mapped[bool] = mapped_column(Boolean, default=False)
+    kind: Mapped[str | None] = mapped_column(String(32))
+
+
+class Device(Base):
+    __tablename__ = "device"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    athlete_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("athlete.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    serial_number: Mapped[str | None] = mapped_column(String(64), index=True)
+    manufacturer: Mapped[str | None] = mapped_column(String(64))
+    model: Mapped[str | None] = mapped_column(String(64))
+    name: Mapped[str | None] = mapped_column(String(120))
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("athlete_id", "serial_number", "manufacturer", "model"),
+    )
+
+
+class AthleteSourceAccount(Base):
+    __tablename__ = "athlete_source_account"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    athlete_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("athlete.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    platform_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("platform.id", ondelete="SET NULL"), nullable=True
+    )
+    device_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("device.id", ondelete="SET NULL"), nullable=True
+    )
+    display_name: Mapped[str | None] = mapped_column(String(120))
+    auth_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    cursor_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=dict)
+    health: Mapped[str] = mapped_column(String(16), default="unknown")
+    auth_status: Mapped[str] = mapped_column(String(32), default="unknown")
+    blocked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
+
+    __table_args__ = (UniqueConstraint("athlete_id", "source"),)
+
+
+class MetricCapability(Base):
+    __tablename__ = "metric_capability"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    metric: Mapped[str] = mapped_column(String(64), nullable=False)
+    availability: Mapped[str] = mapped_column(String(16), default="unavailable")
+    confidence_base: Mapped[float | None] = mapped_column(Numeric(3, 2))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (UniqueConstraint("source", "metric"),)
+
+
+class SourcePriority(Base):
+    __tablename__ = "source_priority"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    athlete_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("athlete.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    metric: Mapped[str] = mapped_column(String(64), nullable=False)
+    priority: Mapped[list[str]] = mapped_column(JSON, default=list)
+
+    __table_args__ = (UniqueConstraint("athlete_id", "metric"),)
