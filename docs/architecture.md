@@ -36,3 +36,32 @@ Principles:
 
 This pipeline lets TrailCoach add, replace or reprocess individual source
 adapters without losing the original data.
+
+## Ingestion Pipeline
+
+Providers (`SourceProvider`) are pure: they turn a source into detached
+`SourceActivity`/`Activity` instances plus an optional `ActivityPayload`
+(raw bytes, canonical stream rows, intervals, device identity). They never
+open transactions or touch the filesystem beyond reading their input.
+
+`IngestionOrchestrator` owns all side effects, for every source:
+
+```text
+provider.initial_import / incremental_sync
+      ↓
+DedupeEngine.evaluate            (REIMPORT / AUTO_LINK / REVIEW / SEPARATE)
+      ↓
+Device upsert  ·  RawStore.store  ·  MetricCapability upsert
+      ↓
+SourceActivity + Activity + ActivityLink (+ DedupeReview)
+      ↓
+streams parquet + intervals  ·  DataLineage provenance
+      ↓
+AthleteSourceAccount cursor / health / last_success_at
+```
+
+`GarminFitProvider` (`garmin_fit`) is the first real provider: it reads a
+local directory of exported `.fit` files (`auth_json.import_dir`), with no
+Garmin API or credentials. `source_activity_id` is `<serial>-<time_created>`
+from the FIT `file_id` message (falls back to the SHA256 of the file), so
+re-exporting the same activity is an idempotent `REIMPORT`.

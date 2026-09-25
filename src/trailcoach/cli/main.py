@@ -6,14 +6,14 @@ from pathlib import Path
 from uuid import UUID
 
 import click
-from sqlalchemy import create_engine
 
-from trailcoach.core.config import settings
-from trailcoach.db.base import Base
-from trailcoach.db.models import Athlete
+from trailcoach.db.init_db import main as init_db_main
+from trailcoach.db.models import Athlete, AthleteSourceAccount
 from trailcoach.db.session import SessionLocal
+from trailcoach.ingest.orchestrator import IngestionOrchestrator
 from trailcoach.ingest.raw_store import RawStore
 from trailcoach.providers.fit_parser import FitParser
+from trailcoach.sources.garmin_fit import GarminFitProvider
 from trailcoach.training.engine import recalculate_athlete
 from trailcoach.training.thresholds import set_threshold
 
@@ -24,15 +24,7 @@ def cli():
     pass
 
 
-@cli.command()
-@click.option("--drop", is_flag=True, help="Drop existing tables.")
-def init_db(drop: bool):
-    """Create database tables."""
-    engine = create_engine(str(settings.db_url))
-    if drop:
-        Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
-    click.echo(f"Database initialized at {settings.db_url}")
+cli.add_command(init_db_main, name="init-db")
 
 
 @cli.command()
@@ -102,6 +94,63 @@ def ingest_fitfiles(path: Path, athlete_id: str, dry_run: bool, ext: str):
     finally:
         db.close()
     click.echo(f"Created {created}, existing {existing}, failed {failed}.")
+
+
+@cli.command("ingest-garmin-fit")
+@click.argument(
+    "path",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+)
+@click.option("--athlete-id", required=True, help="Athlete UUID.")
+@click.option("--incremental", is_flag=True, help="Only import files newer than the cursor.")
+@click.option("--from-date", type=click.DateTime(formats=["%Y-%m-%d"]), default=None)
+@click.option("--to-date", type=click.DateTime(formats=["%Y-%m-%d"]), default=None)
+def ingest_garmin_fit(
+    path: Path,
+    athlete_id: str,
+    incremental: bool,
+    from_date: datetime | None,
+    to_date: datetime | None,
+):
+    """Ingest Garmin .fit exports through the multi-source pipeline (dedup + provenance)."""
+    athlete_uuid = UUID(athlete_id)
+    db = SessionLocal()
+    try:
+        account = (
+            db.query(AthleteSourceAccount)
+            .filter_by(athlete_id=athlete_uuid, source=GarminFitProvider.source)
+            .first()
+        )
+        if account is None:
+            account = AthleteSourceAccount(
+                athlete_id=athlete_uuid,
+                source=GarminFitProvider.source,
+                display_name="Garmin FIT export",
+            )
+            db.add(account)
+        account.auth_json = {**(account.auth_json or {}), "import_dir": str(path.resolve())}
+        db.flush()
+
+        summary = IngestionOrchestrator(db).run(
+            account,
+            GarminFitProvider(),
+            mode="incremental" if incremental else "initial",
+            start=from_date.date() if from_date else None,
+            end=to_date.date() if to_date else None,
+        )
+        db.commit()
+        click.echo(
+            f"{summary.source} [{summary.mode}] created={summary.created} "
+            f"linked={summary.linked} review={summary.reviewed} "
+            f"reimported={summary.reimported} failed={summary.failed}"
+        )
+        for err in summary.errors:
+            click.echo(f"  error: {err}", err=True)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 @cli.command("set-threshold")

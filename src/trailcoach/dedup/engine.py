@@ -2,7 +2,7 @@
 
 import uuid
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -34,6 +34,11 @@ class DedupeAction:
     score: DedupeScore | None = None
     review_id: uuid.UUID | None = None
     reason: str | None = None
+
+
+def _as_utc(value: datetime) -> datetime:
+    """SQLite drops tzinfo on round-trip; stored values are always UTC."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
 class DedupeEngine:
@@ -126,7 +131,6 @@ class DedupeEngine:
                 status="pending",
             )
             db.add(review)
-            db.flush()
             review_id = review.id
             reason = review.reason or "ambiguous match"
         else:
@@ -223,7 +227,7 @@ class DedupeEngine:
         if new_sa.start_time_utc is None or existing_sa.start_time_utc is None:
             return 0.0
         diff = abs(
-            (new_sa.start_time_utc - existing_sa.start_time_utc).total_seconds()
+            (_as_utc(new_sa.start_time_utc) - _as_utc(existing_sa.start_time_utc)).total_seconds()
         )
         return self._clamp(1.0 - diff / self.time_tolerance_s)
 

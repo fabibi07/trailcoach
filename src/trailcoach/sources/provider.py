@@ -7,6 +7,7 @@ from typing import Any
 
 from trailcoach.db.models import (
     Activity,
+    ActivityInterval,
     AthleteSourceAccount,
     MetricCapability,
     RawFile,
@@ -24,12 +25,34 @@ class HistoricalRange:
 
 
 @dataclass
+class ActivityPayload:
+    """Source-agnostic side data for one imported activity.
+
+    Everything here is optional: an aggregator may only provide a summary,
+    a device export may provide the original file plus full time series.
+    `stream_rows` must use canonical channel names (`trailcoach.ingest.streams`).
+    """
+
+    source_activity_id: str
+    raw_content: bytes | None = None
+    raw_kind: str = "file"
+    raw_extension: str = ""
+    raw_content_type: str | None = None
+    stream_rows: list[dict[str, Any]] = field(default_factory=list)
+    intervals: list[ActivityInterval] = field(default_factory=list)
+    device: dict[str, str | None] | None = None
+
+
+@dataclass
 class ImportResult:
     """Result returned by a source provider import/sync operation.
 
     The provider never commits to the database itself; it returns detached
     or newly created model instances and lets the ingestion orchestrator
     persist them. This keeps providers stateless and testable.
+
+    `source_activities[i]` and `activities[i]` describe the same record when
+    both lists are populated. `payloads` is keyed by `source_activity_id`.
     """
 
     source: str
@@ -42,6 +65,7 @@ class ImportResult:
     errors: list[str] = field(default_factory=list)
     cursor: dict[str, Any] = field(default_factory=dict)
     capabilities: list[MetricCapability] = field(default_factory=list)
+    payloads: dict[str, ActivityPayload] = field(default_factory=dict)
 
 
 class SourceProvider(ABC):
