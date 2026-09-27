@@ -9,7 +9,6 @@ import polars as pl
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import func
 
 from trailcoach.db.models import (
     Activity,
@@ -23,6 +22,7 @@ from trailcoach.db.models import (
     TrainingMetricDaily,
 )
 from trailcoach.db.session import SessionLocal, get_db
+from trailcoach.training.engine import activity_day
 from trailcoach.training.thresholds import get_thresholds
 
 
@@ -78,9 +78,9 @@ def list_activities(from_date: date | None = None, to_date: date | None = None, 
     db = next(_get_db())
     q = db.query(Activity)
     if from_date:
-        q = q.filter(func.date(Activity.start_time_utc) >= from_date)
+        q = q.filter(activity_day() >= from_date)
     if to_date:
-        q = q.filter(func.date(Activity.start_time_utc) <= to_date)
+        q = q.filter(activity_day() <= to_date)
     q = q.order_by(Activity.start_time_utc.desc()).limit(limit)
     return [
         {

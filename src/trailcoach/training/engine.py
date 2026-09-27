@@ -9,6 +9,7 @@ from uuid import UUID
 
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from trailcoach.core.config import settings
 from trailcoach.db.models import (
@@ -22,6 +23,15 @@ from trailcoach.db.models import (
 from trailcoach.training.load import MODEL_VERSION, compute_activity_load
 from trailcoach.training.pmc import recalculate_pmc
 from trailcoach.training.thresholds import get_thresholds
+
+
+def activity_day() -> ColumnElement[date]:
+    """Calendar day of an activity on the athlete's wall clock (UTC fallback)."""
+    return func.date(func.coalesce(Activity.start_time_local, Activity.start_time_utc))
+
+
+def activity_day_py(activity: Activity) -> date:
+    return (activity.start_time_local or activity.start_time_utc).date()
 
 
 def _to_date(value: Any) -> date:
@@ -42,7 +52,7 @@ def _recompute_activity_loads(
 ) -> None:
     q = db.query(Activity).filter(Activity.athlete_id == athlete_id)
     if from_date:
-        q = q.filter(func.date(Activity.start_time_utc) >= from_date)
+        q = q.filter(activity_day() >= from_date)
     activities = q.order_by(Activity.start_time_utc).all()
 
     for activity in activities:
@@ -57,7 +67,7 @@ def _recompute_activity_loads(
         if not stream_path.exists():
             continue
 
-        thresholds = get_thresholds(db, athlete_id, activity.start_time_utc.date())
+        thresholds = get_thresholds(db, athlete_id, activity_day_py(activity))
         loads = compute_activity_load(activity, stream_path, thresholds, athlete)
 
         db.query(ActivityLoad).filter(
@@ -88,34 +98,34 @@ def _recompute_daily_loads(
 ) -> None:
     activity_filter = [Activity.athlete_id == athlete_id]
     if from_date:
-        activity_filter.append(func.date(Activity.start_time_utc) >= from_date)
+        activity_filter.append(activity_day() >= from_date)
 
     primary_rows = (
         db.query(
-            func.date(Activity.start_time_utc).label("day"),
+            activity_day().label("day"),
             func.sum(ActivityLoad.value).label("load_primary"),
         )
         .join(Activity, Activity.id == ActivityLoad.activity_id)
         .filter(*activity_filter, ActivityLoad.is_primary.is_(True))
-        .group_by(func.date(Activity.start_time_utc))
+        .group_by(activity_day())
         .all()
     )
 
     method_rows = (
         db.query(
-            func.date(Activity.start_time_utc).label("day"),
+            activity_day().label("day"),
             ActivityLoad.method,
             func.sum(ActivityLoad.value).label("value"),
         )
         .join(Activity, Activity.id == ActivityLoad.activity_id)
         .filter(*activity_filter)
-        .group_by(func.date(Activity.start_time_utc), ActivityLoad.method)
+        .group_by(activity_day(), ActivityLoad.method)
         .all()
     )
 
     summary_rows = (
         db.query(
-            func.date(Activity.start_time_utc).label("day"),
+            activity_day().label("day"),
             func.sum(Activity.distance_m).label("distance_m"),
             func.sum(Activity.ascent_m).label("ascent_m"),
             func.sum(Activity.descent_m).label("descent_m"),
@@ -128,7 +138,7 @@ def _recompute_daily_loads(
             ).label("has_degraded"),
         )
         .filter(*activity_filter)
-        .group_by(func.date(Activity.start_time_utc))
+        .group_by(activity_day())
         .all()
     )
 
@@ -149,20 +159,20 @@ def _recompute_daily_loads(
         d = _to_date(row.day)
         daily_map[d]["load_primary"] += float(row.load_primary or 0.0)
 
-    for row in method_rows:
-        d = _to_date(row.day)
-        daily_map[d]["load_by_method"][row.method] = (
-            daily_map[d]["load_by_method"].get(row.method, 0.0) + float(row.value or 0.0)
+    for mrow in method_rows:
+        d = _to_date(mrow.day)
+        daily_map[d]["load_by_method"][mrow.method] = (
+            daily_map[d]["load_by_method"].get(mrow.method, 0.0) + float(mrow.value or 0.0)
         )
 
-    for row in summary_rows:
-        d = _to_date(row.day)
-        daily_map[d]["distance_m"] = float(row.distance_m or 0.0)
-        daily_map[d]["ascent_m"] = float(row.ascent_m or 0.0)
-        daily_map[d]["descent_m"] = float(row.descent_m or 0.0)
-        daily_map[d]["duration_s"] = float(row.duration_s or 0.0)
-        daily_map[d]["n_activities"] = int(row.n_activities or 0)
-        daily_map[d]["has_degraded"] = bool(row.has_degraded)
+    for srow in summary_rows:
+        d = _to_date(srow.day)
+        daily_map[d]["distance_m"] = float(srow.distance_m or 0.0)
+        daily_map[d]["ascent_m"] = float(srow.ascent_m or 0.0)
+        daily_map[d]["descent_m"] = float(srow.descent_m or 0.0)
+        daily_map[d]["duration_s"] = float(srow.duration_s or 0.0)
+        daily_map[d]["n_activities"] = int(srow.n_activities or 0)
+        daily_map[d]["has_degraded"] = bool(srow.has_degraded)
 
     if not daily_map:
         return

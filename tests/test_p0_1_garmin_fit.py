@@ -523,3 +523,28 @@ def test_no_network_or_garminconnect_dependency():
     loaded = set(sys.modules)
     assert not {m for m in loaded if m.startswith(("garminconnect", "requests", "httpx"))}
     assert importlib.util.find_spec("garminconnect") is None
+
+
+def test_daily_load_groups_by_local_calendar_day(db, athlete, account, fit_dir):
+    """An evening session that is already 'tomorrow' in UTC belongs to the local day."""
+    from trailcoach.db.models import DailyLoad
+    from trailcoach.training.engine import recalculate_athlete
+
+    # 20:30 and 23:00 wall clock on 2024-03-10 at UTC-03:00 → 23:30Z and 02:00Z (next day)
+    evening = datetime(2024, 3, 10, 23, 30, tzinfo=timezone.utc)
+    late = datetime(2024, 3, 11, 2, 0, tzinfo=timezone.utc)
+    write_fit(fit_dir, "1.fit", SyntheticActivity(start=evening, utc_offset_s=-3 * 3600))
+    write_fit(
+        fit_dir,
+        "2.fit",
+        SyntheticActivity(start=late, utc_offset_s=-3 * 3600, serial_number=3_900_001_235),
+    )
+    IngestionOrchestrator(db).run(account, GarminFitProvider())
+    db.flush()
+
+    locals_ = sorted(a.start_time_local.date() for a in db.query(Activity).all())
+    assert locals_ == [date(2024, 3, 10), date(2024, 3, 10)]
+
+    recalculate_athlete(db, athlete.id)
+    rows = db.query(DailyLoad).filter(DailyLoad.athlete_id == athlete.id).all()
+    assert [(r.date, r.n_activities) for r in rows] == [(date(2024, 3, 10), 2)]
