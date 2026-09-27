@@ -27,6 +27,7 @@ MSG_SESSION = 18
 MSG_LAP = 19
 MSG_RECORD = 20
 MSG_DEVICE_INFO = 23
+MSG_ACTIVITY = 34
 
 SPORT_RUNNING = 1
 SPORT_CYCLING = 2
@@ -116,6 +117,8 @@ class SyntheticActivity:
     lat: float = -33.45
     lon: float = -70.66
     include_hr: bool = True
+    cadence_rpm: int = 85  # FIT cadence is per-leg for foot sports (=> 170 spm)
+    utc_offset_s: int | None = -3 * 3600
 
 
 def build_fit(spec: SyntheticActivity | None = None) -> bytes:
@@ -168,7 +171,7 @@ def build_fit(spec: SyntheticActivity | None = None) -> bytes:
             int(dist * 100),
             int((alt + 500) * 5),
             int(speed_mps * 1000),
-            170,
+            spec.cadence_rpm,
         ]
         if spec.include_hr:
             values.append(hr)
@@ -226,13 +229,24 @@ def build_fit(spec: SyntheticActivity | None = None) -> bytes:
         spec.sub_sport,
         spec.ascent_m,
         0,
-        170,
+        spec.cadence_rpm,
     ]
     if spec.include_hr:
         session_fields += [(16, UINT8), (17, UINT8)]
         session_values += [(spec.hr_start + spec.hr_end) // 2, spec.hr_end]
     w.define(FitMessageDef(MSG_SESSION, session_fields, local_num=4))
     w.data(4, session_values)
+
+    if spec.utc_offset_s is not None:
+        w.define(
+            FitMessageDef(
+                MSG_ACTIVITY,
+                [(253, UINT32), (5, UINT32), (1, UINT16), (2, ENUM), (3, ENUM), (4, ENUM)],
+                local_num=5,
+            )
+        )
+        t_end = t0 + spec.duration_s
+        w.data(5, [t_end, t_end + spec.utc_offset_s, 1, 0, 26, 1])
 
     return w.build()
 

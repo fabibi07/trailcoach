@@ -80,9 +80,15 @@ def _first(fields: list[str], data: dict) -> Any:
     return None
 
 
-def _sport_from_fit(sport_raw: str | None, sub_sport_raw: str | None) -> tuple[str, str | None]:
-    s = (sport_raw or "").lower()
-    ss = (sub_sport_raw or "").lower()
+def _sport_from_fit(
+    sport_raw: str | int | None, sub_sport_raw: str | int | None
+) -> tuple[str, str | None]:
+    # fitdecode yields raw ints for enum values missing from its profile
+    # (e.g. Garmin "health snapshot" = 60); keep them as opaque strings.
+    s = str(sport_raw).lower() if sport_raw is not None else ""
+    ss = str(sub_sport_raw).lower() if sub_sport_raw is not None else ""
+    if s.isdigit():
+        return "other", f"fit_sport_{s}"
     if "trail" in ss or "trail" in s:
         return "trail_running", None
     if s in ("running", "run"):
@@ -92,6 +98,27 @@ def _sport_from_fit(sport_raw: str | None, sub_sport_raw: str | None) -> tuple[s
     if s == "swimming":
         return "swimming", ss or None
     return s or "other", ss or None
+
+
+# Sports whose FIT `cadence` is strides per minute per leg (needs x2 for spm).
+FOOT_SPORTS = {"running", "trail_running", "walking", "hiking"}
+
+
+def _cadence_spm(
+    cadence: Any, fractional: Any, sport: str
+) -> float | None:
+    base = none_or_float(cadence)
+    if base is None:
+        return None
+    frac = none_or_float(fractional) or 0.0
+    value = base + frac
+    return value * 2 if sport in FOOT_SPORTS else value
+
+
+def _utc_offset_str(offset_s: int) -> str:
+    sign = "+" if offset_s >= 0 else "-"
+    h, rem = divmod(abs(offset_s), 3600)
+    return f"UTC{sign}{h:02d}:{rem // 60:02d}"
 
 
 def _parse_timestamp(v) -> datetime | None:
@@ -139,6 +166,7 @@ class FitDocument:
     time_created: datetime | None
     start_time: datetime | None
     summary: dict[str, Any]
+    utc_offset_s: int | None = None
     records: list[dict[str, Any]] = field(default_factory=list)
     laps: list[dict[str, Any]] = field(default_factory=list)
     sessions: list[dict[str, Any]] = field(default_factory=list)
@@ -173,7 +201,24 @@ class FitDocument:
 
     @property
     def avg_cadence(self) -> float | None:
-        return none_or_float(_first(["avg_cadence", "avg_running_cadence"], self.summary))
+        return _cadence_spm(
+            _first(["avg_cadence", "avg_running_cadence"], self.summary),
+            _first(["avg_fractional_cadence"], self.summary),
+            self.sport,
+        )
+
+    @property
+    def start_time_local(self) -> datetime | None:
+        """Wall-clock start time on the device, stored as a naive datetime."""
+        if self.start_time is None:
+            return None
+        if self.utc_offset_s is None:
+            return self.start_time
+        return (self.start_time + timedelta(seconds=self.utc_offset_s)).replace(tzinfo=None)
+
+    @property
+    def tz(self) -> str | None:
+        return _utc_offset_str(self.utc_offset_s) if self.utc_offset_s is not None else None
 
     @property
     def avg_power(self) -> float | None:
@@ -216,7 +261,9 @@ class FitDocument:
                     "altitude_m": none_or_float(_first(["enhanced_altitude", "altitude"], r)),
                     "speed_mps": none_or_float(_first(["enhanced_speed", "speed"], r)),
                     "hr_bpm": none_or_float(r.get("heart_rate")),
-                    "cadence_spm": none_or_float(r.get("cadence")),
+                    "cadence_spm": _cadence_spm(
+                        r.get("cadence"), r.get("fractional_cadence"), self.sport
+                    ),
                     "power_w": none_or_float(r.get("power")),
                     "temp_c": none_or_float(r.get("temperature")),
                     "vertical_oscillation_mm": none_or_float(r.get("vertical_oscillation")),
@@ -255,7 +302,7 @@ class FitParser:
     Idempotent: safe to call multiple times for the same RawFile.
     """
 
-    VERSION = "0.2"
+    VERSION = "0.3"
 
     def __init__(self, raw_store: RawStore | None = None, source: str = "fitfile") -> None:
         self.raw_store = raw_store or RawStore()
@@ -270,6 +317,7 @@ class FitParser:
         sessions: list[dict] = []
         file_id_msg: dict = {}
         device_info: dict = {}
+        activity_msg: dict = {}
 
         with fitdecode.FitReader(io.BytesIO(content)) as reader:
             for frame in reader:
@@ -288,6 +336,8 @@ class FitParser:
                     laps.append(fields)
                 elif msg.name == "session":
                     sessions.append(fields)
+                elif msg.name == "activity":
+                    activity_msg = fields
 
         summary = sessions[0] if sessions else (laps[0] if laps else {})
         sport_raw = _first(["sport", "sub_sport"], summary) or _first(["sport"], file_id_msg)
@@ -301,6 +351,14 @@ class FitParser:
         if start_time is None:
             start_time = time_created
 
+        # FIT `activity.local_timestamp` is wall-clock time encoded as if UTC;
+        # its difference to `activity.timestamp` is the device UTC offset.
+        utc_offset_s: int | None = None
+        act_ts = _parse_timestamp(activity_msg.get("timestamp"))
+        act_local = _parse_timestamp(activity_msg.get("local_timestamp"))
+        if act_ts is not None and act_local is not None:
+            utc_offset_s = int(round((act_local - act_ts).total_seconds() / 900)) * 900
+
         return FitDocument(
             sha256=hashlib.sha256(content).hexdigest(),
             file_id=file_id_msg,
@@ -312,6 +370,7 @@ class FitParser:
             time_created=time_created,
             start_time=start_time,
             summary=summary,
+            utc_offset_s=utc_offset_s,
             records=records,
             laps=laps,
             sessions=sessions,
@@ -387,7 +446,8 @@ class FitParser:
         return Activity(
             athlete_id=athlete_id,
             start_time_utc=doc.start_time,
-            start_time_local=doc.start_time,
+            start_time_local=doc.start_time_local,
+            tz=doc.tz,
             sport=doc.sport,
             sub_sport=doc.sub_sport,
             primary_source=self.source,
@@ -437,7 +497,11 @@ class FitParser:
                     max_hr=none_or_float(lap.get("max_heart_rate")),
                     avg_speed_mps=none_or_float(lap.get("avg_speed")),
                     avg_power_w=none_or_float(lap.get("avg_power")),
-                    avg_cadence=none_or_float(lap.get("avg_cadence")),
+                    avg_cadence=_cadence_spm(
+                        _first(["avg_cadence", "avg_running_cadence"], lap),
+                        _first(["avg_fractional_cadence"], lap),
+                        doc.sport,
+                    ),
                     avg_grade=None,
                     vam_mph=None,
                     detector_version=self.VERSION,

@@ -95,6 +95,33 @@ def test_parse_bytes_extracts_summary_device_and_streams():
     assert len(doc.laps) == 1 and len(doc.sessions) == 1
 
 
+def test_parse_bytes_local_time_and_cadence_units():
+    parser = FitParser(source="garmin_fit")
+    spec = SyntheticActivity()
+    doc = parser.parse_bytes(build_fit(spec))
+
+    assert doc.utc_offset_s == -3 * 3600
+    assert doc.tz == "UTC-03:00"
+    assert doc.start_time_local == datetime(2024, 3, 10, 4, 30)
+    # Foot sports: FIT cadence is per-leg -> doubled to strides/min.
+    assert doc.avg_cadence == pytest.approx(2 * spec.cadence_rpm)
+    assert doc.canonical_stream_rows()[0]["cadence_spm"] == pytest.approx(2 * spec.cadence_rpm)
+
+    bike = parser.parse_bytes(build_fit(SyntheticActivity(sport=SPORT_CYCLING, utc_offset_s=None)))
+    assert bike.avg_cadence == pytest.approx(spec.cadence_rpm)
+    assert bike.utc_offset_s is None and bike.tz is None
+    assert bike.start_time_local == bike.start_time
+
+
+def test_parse_bytes_unknown_numeric_sport_is_preserved():
+    # Sport codes missing from the fitdecode profile (e.g. Garmin health snapshot = 60)
+    # are decoded as raw ints and must not break parsing.
+    doc = FitParser(source="garmin_fit").parse_bytes(build_fit(SyntheticActivity(sport=60)))
+    assert doc.sport == "other"
+    assert doc.sub_sport == "fit_sport_60"
+    assert doc.sport_raw == "60"
+
+
 def test_parse_bytes_is_deterministic_and_content_addressed():
     content = build_fit(SyntheticActivity())
     parser = FitParser(source="garmin_fit")
