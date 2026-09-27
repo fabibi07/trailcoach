@@ -3,6 +3,7 @@
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
@@ -36,6 +37,11 @@ class DedupeAction:
     reason: str | None = None
 
 
+def _both_present(a: float | Decimal | None, b: float | Decimal | None) -> bool:
+    """A component is comparable only when both records carry a positive value."""
+    return a is not None and b is not None and float(a) > 0 and float(b) > 0
+
+
 def _as_utc(value: datetime) -> datetime:
     """SQLite drops tzinfo on round-trip; stored values are always UTC."""
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
@@ -47,6 +53,12 @@ class DedupeEngine:
     The engine never updates database objects directly in P0.0; it returns a
     DedupeAction so the orchestrator can commit links and reviews. This makes
     the engine testable and reusable for any source.
+
+    Scoring: time/distance/duration similarities are combined with weights that
+    are renormalized over the components both records actually carry, so a
+    perfect match scores 1.0 whether or not the sport has distance (e.g. gym
+    sessions). `source_bonus` is a small additive tiebreaker scaled by
+    `source_weight`; it can never move a pair across a decision band on its own.
     """
 
     def __init__(
@@ -59,7 +71,7 @@ class DedupeEngine:
         duration_weight: float = 0.25,
         source_weight: float = 0.15,
         auto_link_threshold: float = 0.85,
-        review_threshold: float = 0.70,
+        review_threshold: float = 0.75,
     ) -> None:
         self.time_tolerance_s = time_tolerance_s
         self.distance_tolerance_pct = distance_tolerance_pct
@@ -207,13 +219,15 @@ class DedupeEngine:
         duration_score = self._duration_score(new_sa, existing_sa)
         source_bonus = self._source_bonus(new_sa.source, existing_sa.source, priority_map)
 
-        final = (
-            self.time_weight * time_score
-            + self.distance_weight * distance_score
-            + self.duration_weight * duration_score
-            + self.source_weight * source_bonus
-        )
-        final = max(0.0, min(1.0, final))
+        components = [(self.time_weight, time_score)]
+        if _both_present(new_sa.distance_m, existing_sa.distance_m):
+            components.append((self.distance_weight, distance_score))
+        if _both_present(new_sa.duration_elapsed_s, existing_sa.duration_elapsed_s):
+            components.append((self.duration_weight, duration_score))
+        total_weight = sum(w for w, _ in components)
+        similarity = sum(w * s for w, s in components) / total_weight
+
+        final = max(0.0, min(1.0, similarity + self.source_weight * source_bonus))
 
         return DedupeScore(
             time_score=round(time_score, 4),

@@ -383,14 +383,16 @@ def test_orchestrator_auto_links_same_activity_from_another_source(db, athlete, 
 
 
 def test_orchestrator_keeps_ambiguous_match_for_review(db, athlete, account, fit_dir):
+    # Phone app started ~1 min after the watch and recorded ~3% less: plausible
+    # same session, but not certain enough to auto-link.
     spec = SyntheticActivity()
     existing_activity = Activity(
         athlete_id=athlete.id,
-        start_time_utc=spec.start,
+        start_time_utc=spec.start + timedelta(seconds=60),
         sport="running",
         primary_source="source_a",
-        duration_elapsed_s=spec.duration_s * 0.98,
-        distance_m=spec.distance_m * 0.98,
+        duration_elapsed_s=spec.duration_s * 0.97,
+        distance_m=spec.distance_m * 0.97,
     )
     db.add(existing_activity)
     db.flush()
@@ -401,8 +403,8 @@ def test_orchestrator_keeps_ambiguous_match_for_review(db, athlete, account, fit
             source_activity_id="ext-2",
             canonical_activity_id=existing_activity.id,
             start_time_utc=existing_activity.start_time_utc,
-            duration_elapsed_s=spec.duration_s * 0.98,
-            distance_m=spec.distance_m * 0.98,
+            duration_elapsed_s=spec.duration_s * 0.97,
+            distance_m=spec.distance_m * 0.97,
             status="linked",
         )
     )

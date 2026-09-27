@@ -331,6 +331,62 @@ def test_dedup_exact_reimport(db, athlete):
     assert action.existing_source_activity_id == existing.id
 
 
+def test_dedup_realistic_second_device_auto_links(db, athlete):
+    """Same session on two devices: seconds apart, ~2% distance drift -> AUTO_LINK."""
+    existing, _ = _make_existing(db, athlete)
+    engine = DedupeEngine()
+    new_sa = SourceActivity(
+        athlete_id=athlete.id,
+        source="source_b",
+        source_activity_id="source_b-001",
+        start_time_utc=existing.start_time_utc + timedelta(seconds=15),
+        sport_raw="running",
+        distance_m=float(existing.distance_m) * 1.02,
+        duration_elapsed_s=float(existing.duration_elapsed_s) * 1.01,
+    )
+    action = engine.evaluate(db, new_sa)
+    assert action.decision == "AUTO_LINK"
+    assert action.score is not None and action.score.source_bonus == 0.0
+
+
+def test_dedup_weights_renormalize_when_distance_missing(db, athlete):
+    """Gym sessions carry no distance; the pair must still be able to auto-link."""
+    existing, _ = _make_existing(db, athlete, distance_m=None, source_activity_id="gym-1")
+    engine = DedupeEngine()
+    new_sa = SourceActivity(
+        athlete_id=athlete.id,
+        source="source_b",
+        source_activity_id="gym-2",
+        start_time_utc=existing.start_time_utc,
+        sport_raw="running",
+        distance_m=None,
+        duration_elapsed_s=existing.duration_elapsed_s,
+    )
+    action = engine.evaluate(db, new_sa)
+    assert action.decision == "AUTO_LINK"
+    assert action.score is not None
+    assert action.score.distance_score == 0.0
+    assert action.score.final_score == 1.0
+
+    # An accidental 15 s start right before a real session is a different record.
+    short = SourceActivity(
+        athlete_id=athlete.id,
+        source="source_b",
+        source_activity_id="gym-3",
+        start_time_utc=existing.start_time_utc + timedelta(seconds=30),
+        sport_raw="running",
+        distance_m=None,
+        duration_elapsed_s=15.0,
+    )
+    assert engine.evaluate(db, short).decision == "SEPARATE"
+
+
+def test_dedup_source_bonus_cannot_cross_decision_band(db, athlete):
+    engine = DedupeEngine()
+    max_bonus_effect = engine.source_weight * 0.10
+    assert max_bonus_effect < engine.auto_link_threshold - engine.review_threshold
+
+
 # ---------------------------------------------------------------------------
 # Provenance / data lineage
 # ---------------------------------------------------------------------------
