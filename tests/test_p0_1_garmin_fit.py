@@ -550,3 +550,27 @@ def test_daily_load_groups_by_local_calendar_day(db, athlete, account, fit_dir):
     recalculate_athlete(db, athlete.id)
     rows = db.query(DailyLoad).filter(DailyLoad.athlete_id == athlete.id).all()
     assert [(r.date, r.n_activities) for r in rows] == [(date(2024, 3, 10), 2)]
+
+
+def test_recalculate_reports_activities_without_load(db, athlete, account, fit_dir):
+    """Missing thresholds must be reported, not silently yield zero load."""
+    from trailcoach.training.engine import LOAD_THRESHOLD_KINDS, recalculate_athlete
+    from trailcoach.training.thresholds import set_threshold
+
+    write_fit(fit_dir, "run.fit", SyntheticActivity())
+    IngestionOrchestrator(db).run(account, GarminFitProvider())
+    db.flush()
+
+    result = recalculate_athlete(db, athlete.id)
+    assert result["activities_without_load"] == 1
+    assert result["missing_threshold_kinds"] == list(LOAD_THRESHOLD_KINDS)
+
+    since = date(2000, 1, 1)
+    set_threshold(db, athlete.id, "lthr_bpm", 165, "bpm", since)
+    set_threshold(db, athlete.id, "hr_max_bpm", 190, "bpm", since)
+    set_threshold(db, athlete.id, "resting_hr_bpm", 50, "bpm", since)
+    db.flush()
+
+    result = recalculate_athlete(db, athlete.id)
+    assert result["activities_without_load"] == 0
+    assert result["missing_threshold_kinds"] == ["ftp_pace_mps", "ftp_power_w"]

@@ -248,6 +248,13 @@ def recalculate(athlete_id: str, from_date: datetime | None):
             commit=True,
         )
         click.echo(f"Recalculated: {result}")
+        if result["activities_without_load"]:
+            missing = ", ".join(result["missing_threshold_kinds"]) or "-"
+            click.echo(
+                f"AVISO: {result['activities_without_load']} actividades sin carga; "
+                f"umbrales faltantes: {missing}. Usa `trailcoach seed-thresholds`.",
+                err=True,
+            )
     except Exception:
         db.rollback()
         raise

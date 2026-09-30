@@ -17,6 +17,7 @@ from trailcoach.db.models import (
     ActivityLoad,
     ActivityStreamSet,
     Athlete,
+    AthleteThreshold,
     DailyLoad,
     TrainingMetricDaily,
 )
@@ -49,7 +50,9 @@ def _recompute_activity_loads(
     athlete_id: UUID,
     athlete: Athlete,
     from_date: date | None,
-) -> None:
+) -> int:
+    """Recompute per-activity loads; return how many activities got no load at all."""
+    without_load = 0
     q = db.query(Activity).filter(Activity.athlete_id == athlete_id)
     if from_date:
         q = q.filter(activity_day() >= from_date)
@@ -69,6 +72,8 @@ def _recompute_activity_loads(
 
         thresholds = get_thresholds(db, athlete_id, activity_day_py(activity))
         loads = compute_activity_load(activity, stream_path, thresholds, athlete)
+        if not loads:
+            without_load += 1
 
         db.query(ActivityLoad).filter(
             ActivityLoad.activity_id == activity.id,
@@ -89,6 +94,7 @@ def _recompute_activity_loads(
                 )
             )
         db.flush()
+    return without_load
 
 
 def _recompute_daily_loads(
@@ -203,6 +209,25 @@ def _recompute_daily_loads(
     db.flush()
 
 
+LOAD_THRESHOLD_KINDS = (
+    "ftp_pace_mps",
+    "ftp_power_w",
+    "lthr_bpm",
+    "hr_max_bpm",
+    "resting_hr_bpm",
+)
+
+
+def _missing_threshold_kinds(db: Session, athlete_id: UUID) -> list[str]:
+    present = {
+        kind
+        for (kind,) in db.query(AthleteThreshold.kind)
+        .filter(AthleteThreshold.athlete_id == athlete_id)
+        .distinct()
+    }
+    return [k for k in LOAD_THRESHOLD_KINDS if k not in present]
+
+
 def recalculate_athlete(
     db: Session,
     athlete_id: UUID,
@@ -214,7 +239,7 @@ def recalculate_athlete(
     if athlete is None:
         raise ValueError(f"Athlete {athlete_id} not found")
 
-    _recompute_activity_loads(db, athlete_id, athlete, from_date)
+    without_load = _recompute_activity_loads(db, athlete_id, athlete, from_date)
     _recompute_daily_loads(db, athlete_id, from_date)
     recalculate_pmc(db, athlete_id, from_date)
 
@@ -229,4 +254,6 @@ def recalculate_athlete(
         "athlete_id": str(athlete_id),
         "daily_load_rows": n_daily,
         "training_metric_rows": n_metrics,
+        "activities_without_load": without_load,
+        "missing_threshold_kinds": _missing_threshold_kinds(db, athlete_id),
     }
