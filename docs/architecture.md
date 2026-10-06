@@ -34,6 +34,12 @@ Principles:
    `provenance` JSON on `Activity` and `WellnessDaily` records the source,
    source record id, raw file, device and account.
 
+6. **Per-source summary metrics stay per source.**
+   `activity_source_metric` and `activity_zone_time` store provider-neutral
+   metrics (`calories_kcal`, `aerobic_training_effect`, HR/power zone times)
+   keyed by `source_activity_id`; `trailcoach reprocess-raw` rebuilds them
+   from `RawFile` via `SourceProvider.payload_from_raw`.
+
 This pipeline lets TrailCoach add, replace or reprocess individual source
 adapters without losing the original data.
 

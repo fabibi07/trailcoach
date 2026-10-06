@@ -27,8 +27,10 @@ from sqlalchemy.orm import Session
 from trailcoach.db.models import (
     Activity,
     ActivityInterval,
+    ActivitySourceMetric,
     ActivityStreamChannel,
     ActivityStreamSet,
+    ActivityZoneTime,
     RawFile,
     SourceActivity,
 )
@@ -71,6 +73,54 @@ FIT_FIELD_MAP = {
     "vertical_ratio": ("vertical_ratio_pct", "%", none_or_float),
     "grade": ("grade_pct", "%", none_or_float),
 }
+
+
+# FIT session field -> (provider-neutral metric, unit, scale)
+FIT_SESSION_METRICS: list[tuple[str, str, str | None, float]] = [
+    ("total_calories", "calories_kcal", "kcal", 1.0),
+    ("total_training_effect", "aerobic_training_effect", None, 1.0),
+    ("total_anaerobic_training_effect", "anaerobic_training_effect", None, 1.0),
+    ("training_load_peak", "training_load_native", None, 1.0),
+    ("normalized_power", "normalized_power_w", "W", 1.0),
+    ("total_work", "work_j", "J", 1.0),
+    ("rmssd_hrv", "hrv_rmssd_ms", "ms", 1.0),
+    ("sdrr_hrv", "hrv_sdrr_ms", "ms", 1.0),
+    ("workout_rpe", "rpe", "1-10", 0.1),
+    ("workout_feel", "feel_pct", "%", 1.0),
+    ("avg_stress", "stress_avg_pct", "%", 1.0),
+    ("avg_spo2", "spo2_avg_pct", "%", 1.0),
+]
+
+# FIT time_in_zone field -> (provider-neutral metric, unit); device settings
+# in effect when the activity was recorded.
+FIT_ZONE_SETTINGS_METRICS: list[tuple[str, str, str]] = [
+    ("threshold_heart_rate", "device_lthr_bpm", "bpm"),
+    ("max_heart_rate", "device_hr_max_bpm", "bpm"),
+    ("resting_heart_rate", "device_resting_hr_bpm", "bpm"),
+    ("functional_threshold_power", "device_ftp_power_w", "W"),
+]
+
+# zone_kind -> (time field, boundary field, boundary unit, calc type field)
+FIT_ZONE_KINDS: list[tuple[str, str, str, str, str | None]] = [
+    ("heart_rate", "time_in_hr_zone", "hr_zone_high_boundary", "bpm", "hr_calc_type"),
+    ("power", "time_in_power_zone", "power_zone_high_boundary", "W", "pwr_calc_type"),
+    ("speed", "time_in_speed_zone", "speed_zone_high_boundary", "m/s", None),
+    ("cadence", "time_in_cadence_zone", "cadence_zone_high_bondary", "rpm", None),
+]
+
+
+def _numeric(v: Any) -> float | None:
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    return none_or_float(v)
+
+
+def _as_tuple(v: Any) -> tuple[Any, ...]:
+    if v is None:
+        return ()
+    if isinstance(v, (tuple, list)):
+        return tuple(v)
+    return (v,)
 
 
 def _first(fields: list[str], data: dict) -> Any:
@@ -170,6 +220,7 @@ class FitDocument:
     records: list[dict[str, Any]] = field(default_factory=list)
     laps: list[dict[str, Any]] = field(default_factory=list)
     sessions: list[dict[str, Any]] = field(default_factory=list)
+    session_zones: dict[str, Any] = field(default_factory=dict)
 
     @property
     def duration_elapsed_s(self) -> float | None:
@@ -302,7 +353,7 @@ class FitParser:
     Idempotent: safe to call multiple times for the same RawFile.
     """
 
-    VERSION = "0.3"
+    VERSION = "0.4"
 
     def __init__(self, raw_store: RawStore | None = None, source: str = "fitfile") -> None:
         self.raw_store = raw_store or RawStore()
@@ -318,6 +369,7 @@ class FitParser:
         file_id_msg: dict = {}
         device_info: dict = {}
         activity_msg: dict = {}
+        session_zones: dict = {}
 
         with fitdecode.FitReader(io.BytesIO(content)) as reader:
             for frame in reader:
@@ -338,6 +390,12 @@ class FitParser:
                     sessions.append(fields)
                 elif msg.name == "activity":
                     activity_msg = fields
+                elif (
+                    msg.name == "time_in_zone"
+                    and not session_zones
+                    and fields.get("reference_mesg") == "session"
+                ):
+                    session_zones = fields
 
         summary = sessions[0] if sessions else (laps[0] if laps else {})
         sport_raw = _first(["sport", "sub_sport"], summary) or _first(["sport"], file_id_msg)
@@ -374,6 +432,7 @@ class FitParser:
             records=records,
             laps=laps,
             sessions=sessions,
+            session_zones=session_zones,
         )
 
     @staticmethod
@@ -509,6 +568,55 @@ class FitParser:
                 )
             )
         return intervals
+
+    def build_source_metrics(self, doc: FitDocument) -> list[ActivitySourceMetric]:
+        """Session summary metrics as detached rows (activity ids set later)."""
+        session = doc.sessions[0] if doc.sessions else {}
+        specs = [(f, m, u, k, session) for f, m, u, k in FIT_SESSION_METRICS] + [
+            (f, m, u, 1.0, doc.session_zones) for f, m, u in FIT_ZONE_SETTINGS_METRICS
+        ]
+        metrics: list[ActivitySourceMetric] = []
+        for fit_field, metric, unit, scale, data in specs:
+            value = _numeric(data.get(fit_field))
+            if value is None:
+                continue
+            metrics.append(
+                ActivitySourceMetric(
+                    source=self.source,
+                    metric=metric,
+                    value=round(value * scale, 4),
+                    unit=unit,
+                    value_type="native",
+                    source_field=fit_field,
+                )
+            )
+        return metrics
+
+    def build_zone_times(self, doc: FitDocument) -> list[ActivityZoneTime]:
+        """Session-level time in zone per zone kind as detached rows."""
+        zones = doc.session_zones
+        rows: list[ActivityZoneTime] = []
+        for kind, time_field, bound_field, unit, calc_field in FIT_ZONE_KINDS:
+            times = _as_tuple(zones.get(time_field))
+            bounds = _as_tuple(zones.get(bound_field))
+            calc = zones.get(calc_field) if calc_field else None
+            for index, raw_seconds in enumerate(times):
+                seconds = _numeric(raw_seconds)
+                if seconds is None:
+                    continue
+                bound = _numeric(bounds[index]) if index < len(bounds) else None
+                rows.append(
+                    ActivityZoneTime(
+                        source=self.source,
+                        zone_kind=kind,
+                        zone_index=index,
+                        seconds=seconds,
+                        upper_bound=bound,
+                        unit=unit,
+                        calc_basis=str(calc) if calc is not None else None,
+                    )
+                )
+        return rows
 
     def persist_streams(
         self,

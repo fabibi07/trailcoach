@@ -28,6 +28,7 @@ MSG_LAP = 19
 MSG_RECORD = 20
 MSG_DEVICE_INFO = 23
 MSG_ACTIVITY = 34
+MSG_TIME_IN_ZONE = 216
 
 SPORT_RUNNING = 1
 SPORT_CYCLING = 2
@@ -64,6 +65,7 @@ def degrees_to_semicircles(deg: float) -> int:
 class FitMessageDef:
     global_num: int
     fields: list[tuple[int, int]]  # (field_def_num, base_type)
+    arrays: dict[int, int] = field(default_factory=dict)  # field_def_num -> length
     local_num: int = 0
 
 
@@ -77,16 +79,19 @@ class FitWriter:
         out = bytearray([header, 0, 0])
         out += struct.pack("<HB", msg.global_num, len(msg.fields))
         for def_num, base_type in msg.fields:
-            out += bytes([def_num, _SIZE[base_type], base_type])
+            size = _SIZE[base_type] * msg.arrays.get(def_num, 1)
+            out += bytes([def_num, size, base_type])
         self._body += out
         self._defined[msg.local_num] = msg
 
-    def data(self, local_num: int, values: list[int]) -> None:
+    def data(self, local_num: int, values: list[int | list[int]]) -> None:
         msg = self._defined[local_num]
         assert len(values) == len(msg.fields)
         out = bytearray([local_num & 0x0F])
         for (_, base_type), value in zip(msg.fields, values, strict=True):
-            out += struct.pack("<" + _FMT[base_type], value)
+            items = value if isinstance(value, list) else [value]
+            for item in items:
+                out += struct.pack("<" + _FMT[base_type], item)
         self._body += out
 
     def build(self) -> bytes:
@@ -119,6 +124,13 @@ class SyntheticActivity:
     include_hr: bool = True
     cadence_rpm: int = 85  # FIT cadence is per-leg for foot sports (=> 170 spm)
     utc_offset_s: int | None = -3 * 3600
+    calories_kcal: int | None = None
+    training_effect_x10: int | None = None  # FIT stores TE * 10
+    anaerobic_training_effect_x10: int | None = None
+    rpe_x10: int | None = None  # FIT stores RPE (1-10) * 10
+    hr_zone_seconds: list[int] | None = None
+    hr_zone_bounds: list[int] | None = None
+    threshold_hr_bpm: int = 170
 
 
 def build_fit(spec: SyntheticActivity | None = None) -> bytes:
@@ -234,8 +246,40 @@ def build_fit(spec: SyntheticActivity | None = None) -> bytes:
     if spec.include_hr:
         session_fields += [(16, UINT8), (17, UINT8)]
         session_values += [(spec.hr_start + spec.hr_end) // 2, spec.hr_end]
+    optional_session = [
+        (11, UINT16, spec.calories_kcal),
+        (24, UINT8, spec.training_effect_x10),
+        (137, UINT8, spec.anaerobic_training_effect_x10),
+        (193, UINT8, spec.rpe_x10),
+    ]
+    for def_num, base_type, value in optional_session:
+        if value is not None:
+            session_fields.append((def_num, base_type))
+            session_values.append(value)
     w.define(FitMessageDef(MSG_SESSION, session_fields, local_num=4))
     w.data(4, session_values)
+
+    if spec.hr_zone_seconds is not None:
+        bounds = spec.hr_zone_bounds or []
+        w.define(
+            FitMessageDef(
+                MSG_TIME_IN_ZONE,
+                [(253, UINT32), (0, UINT16), (1, UINT16), (2, UINT32), (6, UINT8), (13, UINT8)],
+                local_num=6,
+                arrays={2: len(spec.hr_zone_seconds), 6: max(len(bounds), 1)},
+            )
+        )
+        w.data(
+            6,
+            [
+                t0 + spec.duration_s,
+                MSG_SESSION,
+                0,
+                [s * 1000 for s in spec.hr_zone_seconds],
+                bounds or [0xFF],
+                spec.threshold_hr_bpm,
+            ],
+        )
 
     if spec.utc_offset_s is not None:
         w.define(

@@ -12,8 +12,10 @@ from trailcoach.db.models import Athlete, AthleteSourceAccount
 from trailcoach.db.session import SessionLocal
 from trailcoach.ingest.orchestrator import IngestionOrchestrator
 from trailcoach.ingest.raw_store import RawStore
+from trailcoach.ingest.reprocess import reprocess_activity_metrics
 from trailcoach.providers.fit_parser import FitParser
 from trailcoach.sources.garmin_fit import GarminFitProvider
+from trailcoach.sources.registry import SourceProviderRegistry
 from trailcoach.training.engine import recalculate_athlete
 from trailcoach.training.thresholds import set_threshold
 
@@ -143,6 +145,34 @@ def ingest_garmin_fit(
             f"{summary.source} [{summary.mode}] created={summary.created} "
             f"linked={summary.linked} review={summary.reviewed} "
             f"reimported={summary.reimported} failed={summary.failed}"
+        )
+        for err in summary.errors:
+            click.echo(f"  error: {err}", err=True)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@cli.command("reprocess-raw")
+@click.option("--athlete-id", required=True, help="Athlete UUID.")
+@click.option("--source", required=True, help="Registered source slug (e.g. garmin_fit).")
+def reprocess_raw(athlete_id: str, source: str):
+    """Rebuild per-source activity metrics and zone times from stored raw files."""
+    provider_cls = SourceProviderRegistry.get(source)
+    if provider_cls is None:
+        raise click.BadParameter(
+            f"unknown source {source!r}; known: {SourceProviderRegistry.list_sources()}",
+            param_hint="--source",
+        )
+    db = SessionLocal()
+    try:
+        summary = reprocess_activity_metrics(db, provider_cls(), UUID(athlete_id))
+        db.commit()
+        click.echo(
+            f"{summary.source} reprocessed={summary.processed} skipped={summary.skipped} "
+            f"failed={summary.failed} metrics={summary.metrics} zone_times={summary.zone_times}"
         )
         for err in summary.errors:
             click.echo(f"  error: {err}", err=True)

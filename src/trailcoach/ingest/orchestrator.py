@@ -36,6 +36,23 @@ from trailcoach.provenance import DataLineage
 from trailcoach.sources.provider import ActivityPayload, ImportResult, SourceProvider
 
 
+def add_payload_metrics(
+    db: Session, payload: ActivityPayload, sa: SourceActivity, canonical_id: uuid.UUID
+) -> tuple[int, int]:
+    """Attach the payload's source metrics and zone times to their activity."""
+    for metric in payload.metrics:
+        metric.activity_id = canonical_id
+        metric.source_activity_id = sa.id
+        metric.source = sa.source
+        db.add(metric)
+    for zone in payload.zone_times:
+        zone.activity_id = canonical_id
+        zone.source_activity_id = sa.id
+        zone.source = sa.source
+        db.add(zone)
+    return len(payload.metrics), len(payload.zone_times)
+
+
 @dataclass
 class IngestSummary:
     source: str
@@ -220,6 +237,7 @@ class IngestionOrchestrator:
             for interval in payload.intervals:
                 interval.activity_id = canonical_id
                 self.db.add(interval)
+            add_payload_metrics(self.db, payload, sa, canonical_id)
         self.db.flush()
 
     def _link(

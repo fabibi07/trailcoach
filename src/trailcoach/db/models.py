@@ -276,6 +276,62 @@ class ActivityInterval(Base):
     meta: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
 
+class ActivitySourceMetric(Base):
+    """Scalar summary metric reported by one source for one activity.
+
+    Metric names are provider-neutral (e.g. `calories_kcal`,
+    `aerobic_training_effect`); several sources may report the same metric
+    for the same canonical activity, and `SourcePriority` decides which one
+    is consumed.
+    """
+
+    __tablename__ = "activity_source_metric"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    activity_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("activity.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_activity_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("source_activity.id", ondelete="CASCADE"), nullable=False
+    )
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    metric: Mapped[str] = mapped_column(String(64), nullable=False)
+    value: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    unit: Mapped[str | None] = mapped_column(String(16))
+    value_type: Mapped[str] = mapped_column(String(16), default="native")
+    source_field: Mapped[str | None] = mapped_column(String(64))
+
+    __table_args__ = (UniqueConstraint("source_activity_id", "metric"),)
+
+
+class ActivityZoneTime(Base):
+    """Time spent in one intensity zone, as reported by one source.
+
+    `zone_kind` is a provider-neutral dimension (`heart_rate`, `power`, ...).
+    `upper_bound` is the zone's upper limit as configured on the source at
+    the time of the activity, which may differ from `AthleteZone`.
+    """
+
+    __tablename__ = "activity_zone_time"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    activity_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("activity.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_activity_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("source_activity.id", ondelete="CASCADE"), nullable=False
+    )
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    zone_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    zone_index: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    seconds: Mapped[float] = mapped_column(Numeric(12, 3), nullable=False)
+    upper_bound: Mapped[float | None] = mapped_column(Numeric(10, 3))
+    unit: Mapped[str | None] = mapped_column(String(16))
+    calc_basis: Mapped[str | None] = mapped_column(String(32))
+
+    __table_args__ = (UniqueConstraint("source_activity_id", "zone_kind", "zone_index"),)
+
+
 class ActivityFeature(Base):
     __tablename__ = "activity_feature"
 

@@ -8,6 +8,8 @@ from typing import Any
 from trailcoach.db.models import (
     Activity,
     ActivityInterval,
+    ActivitySourceMetric,
+    ActivityZoneTime,
     AthleteSourceAccount,
     MetricCapability,
     RawFile,
@@ -31,6 +33,8 @@ class ActivityPayload:
     Everything here is optional: an aggregator may only provide a summary,
     a device export may provide the original file plus full time series.
     `stream_rows` must use canonical channel names (`trailcoach.ingest.streams`).
+    `metrics` and `zone_times` are detached rows whose activity ids are set by
+    the orchestrator once the canonical activity is known.
     """
 
     source_activity_id: str
@@ -41,6 +45,8 @@ class ActivityPayload:
     stream_rows: list[dict[str, Any]] = field(default_factory=list)
     intervals: list[ActivityInterval] = field(default_factory=list)
     device: dict[str, str | None] | None = None
+    metrics: list[ActivitySourceMetric] = field(default_factory=list)
+    zone_times: list[ActivityZoneTime] = field(default_factory=list)
 
 
 @dataclass
@@ -117,6 +123,16 @@ class SourceProvider(ABC):
         self, account: AthleteSourceAccount, source_activity_id: str
     ) -> bytes | None:
         """Download the raw activity file when the source supports it."""
+
+    def payload_from_raw(
+        self, content: bytes, source_activity_id: str
+    ) -> ActivityPayload | None:
+        """Rebuild an `ActivityPayload` from a stored raw record.
+
+        Enables reprocessing raw data with a newer parser without
+        re-importing. Sources that cannot reparse their raw data return None.
+        """
+        return None
 
     @abstractmethod
     def get_wellness(

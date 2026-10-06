@@ -41,6 +41,10 @@ GARMIN_FIT_CAPABILITIES: list[tuple[str, str, str | None]] = [
     ("power", "native", "Only when a power sensor / running power is recorded"),
     ("temperature", "native", "Only on devices with a temperature sensor"),
     ("running_dynamics", "native", "Only with compatible sensor"),
+    ("calories", "native", "Session total_calories"),
+    ("training_effect", "native", "Device-computed aerobic/anaerobic training effect"),
+    ("time_in_zone", "native", "HR/power zone times with device-configured boundaries"),
+    ("rpe", "native", "Only when the athlete rates the workout on the device"),
     ("hrv", "unavailable", "Daily HRV is not part of activity FIT files"),
     ("resting_hr", "unavailable", "Requires Garmin Connect wellness export"),
     ("sleep_score", "unavailable", "Requires Garmin Connect wellness export"),
@@ -91,6 +95,20 @@ class GarminFitProvider(SourceProvider):
         """Prefer the Garmin `file_id` identity; fall back to content hash."""
         return doc.natural_id() or doc.sha256
 
+    def _payload(self, doc: FitDocument, content: bytes, sa_id: str) -> ActivityPayload:
+        return ActivityPayload(
+            source_activity_id=sa_id,
+            raw_content=content,
+            raw_kind="fit",
+            raw_extension=self.extension,
+            raw_content_type="application/vnd.ant.fit",
+            stream_rows=doc.canonical_stream_rows(),
+            intervals=self.parser.build_intervals(None, doc),
+            device=doc.device.to_dict(),
+            metrics=self.parser.build_source_metrics(doc),
+            zone_times=self.parser.build_zone_times(doc),
+        )
+
     def _build_result(
         self,
         account: AthleteSourceAccount,
@@ -114,16 +132,7 @@ class GarminFitProvider(SourceProvider):
             activity = self.parser.build_activity(doc, account.athlete_id)
             result.source_activities.append(sa)
             result.activities.append(activity)
-            result.payloads[sa_id] = ActivityPayload(
-                source_activity_id=sa_id,
-                raw_content=content,
-                raw_kind="fit",
-                raw_extension=self.extension,
-                raw_content_type="application/vnd.ant.fit",
-                stream_rows=doc.canonical_stream_rows(),
-                intervals=self.parser.build_intervals(None, doc),
-                device=doc.device.to_dict(),
-            )
+            result.payloads[sa_id] = self._payload(doc, content, sa_id)
             if last_start is None or doc.start_time > last_start:
                 last_start = doc.start_time
 
@@ -215,6 +224,11 @@ class GarminFitProvider(SourceProvider):
             if self.source_activity_id(doc) == source_activity_id:
                 return content
         return None
+
+    def payload_from_raw(
+        self, content: bytes, source_activity_id: str
+    ) -> ActivityPayload | None:
+        return self._payload(self.parser.parse_bytes(content), content, source_activity_id)
 
     def get_wellness(
         self, account: AthleteSourceAccount, start: date, end: date
