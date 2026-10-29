@@ -448,6 +448,37 @@ class WellnessDaily(Base):
     )
 
 
+class WellnessSourceMetric(Base):
+    """Métrica diaria de bienestar reportada por una fuente.
+
+    Complementa a `WellnessDaily` con métricas que no tienen columna propia
+    (pasos, estrés, etapas de sueño, ...). Los nombres son neutrales respecto
+    de la fuente; `SourcePriority` decide qué fuente se consume.
+    """
+
+    __tablename__ = "wellness_source_metric"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    athlete_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("athlete.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    metric: Mapped[str] = mapped_column(String(64), nullable=False)
+    value: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+    unit: Mapped[str | None] = mapped_column(String(16))
+    value_type: Mapped[str] = mapped_column(String(16), default="native")
+    source_field: Mapped[str | None] = mapped_column(String(64))
+    account_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("athlete_source_account.id", ondelete="SET NULL"), nullable=True
+    )
+    raw_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("raw_file.id", ondelete="SET NULL"), nullable=True
+    )
+
+    __table_args__ = (UniqueConstraint("athlete_id", "date", "source", "metric"),)
+
+
 class AthleteStateSnapshot(Base):
     __tablename__ = "athlete_state_snapshot"
 

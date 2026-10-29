@@ -15,6 +15,7 @@ from trailcoach.db.models import (
     RawFile,
     SourceActivity,
     WellnessDaily,
+    WellnessSourceMetric,
 )
 
 
@@ -50,6 +51,28 @@ class ActivityPayload:
 
 
 @dataclass
+class WellnessPayload:
+    """Bienestar diario obtenido desde un único registro RAW de la fuente.
+
+    El proveedor entrega el contenido original (`raw_content`) sin
+    persistirlo; el orquestador lo guarda en el `RawStore` y enlaza
+    `records` y `metrics` con ese `RawFile`. `name` identifica el tipo de
+    registro (p. ej. `daily_summary`, `sleep`, `hrv`) en la procedencia.
+    Los campos `None` de `records` no sobrescriben valores ya guardados, de
+    modo que varios registros RAW pueden completar el mismo día.
+    """
+
+    name: str
+    raw_content: bytes | None = None
+    raw_kind: str = "wellness_json"
+    raw_extension: str = ".json"
+    raw_content_type: str | None = "application/json"
+    captured_at: date | None = None
+    records: list[WellnessDaily] = field(default_factory=list)
+    metrics: list[WellnessSourceMetric] = field(default_factory=list)
+
+
+@dataclass
 class ImportResult:
     """Result returned by a source provider import/sync operation.
 
@@ -72,6 +95,7 @@ class ImportResult:
     cursor: dict[str, Any] = field(default_factory=dict)
     capabilities: list[MetricCapability] = field(default_factory=list)
     payloads: dict[str, ActivityPayload] = field(default_factory=dict)
+    wellness_payloads: list[WellnessPayload] = field(default_factory=list)
 
 
 class SourceProvider(ABC):

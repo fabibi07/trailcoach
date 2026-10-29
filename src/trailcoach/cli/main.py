@@ -7,6 +7,7 @@ from uuid import UUID
 
 import click
 
+from trailcoach.core.config import settings
 from trailcoach.db.init_db import main as init_db_main
 from trailcoach.db.models import Athlete, AthleteSourceAccount
 from trailcoach.db.session import SessionLocal
@@ -14,6 +15,7 @@ from trailcoach.ingest.orchestrator import IngestionOrchestrator
 from trailcoach.ingest.raw_store import RawStore
 from trailcoach.ingest.reprocess import reprocess_activity_metrics
 from trailcoach.providers.fit_parser import FitParser
+from trailcoach.sources.garmin_connect import DEFAULT_KEY_ENV, GarminConnectProvider
 from trailcoach.sources.garmin_fit import GarminFitProvider
 from trailcoach.sources.registry import SourceProviderRegistry
 from trailcoach.training.engine import recalculate_athlete
@@ -145,6 +147,70 @@ def ingest_garmin_fit(
             f"{summary.source} [{summary.mode}] created={summary.created} "
             f"linked={summary.linked} review={summary.reviewed} "
             f"reimported={summary.reimported} failed={summary.failed}"
+        )
+        for err in summary.errors:
+            click.echo(f"  error: {err}", err=True)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@cli.command("ingest-garmin-connect")
+@click.option("--athlete-id", required=True, help="UUID del atleta.")
+@click.option("--incremental", is_flag=True, help="Solo lo nuevo desde el cursor de la cuenta.")
+@click.option("--from-date", type=click.DateTime(formats=["%Y-%m-%d"]), default=None)
+@click.option("--to-date", type=click.DateTime(formats=["%Y-%m-%d"]), default=None)
+@click.option("--no-wellness", is_flag=True, help="No importar bienestar diario.")
+def ingest_garmin_connect(
+    athlete_id: str,
+    incremental: bool,
+    from_date: datetime | None,
+    to_date: datetime | None,
+    no_wellness: bool,
+):
+    """Importa actividades (FIT) y bienestar desde la API Personal de Garmin Connect.
+
+    La API key se lee de la variable GARMIN_PERSONAL_API_KEY (entorno o .env).
+    """
+    athlete_uuid = UUID(athlete_id)
+    secret = settings.garmin_personal_api_key
+    db = SessionLocal()
+    try:
+        account = (
+            db.query(AthleteSourceAccount)
+            .filter_by(athlete_id=athlete_uuid, source=GarminConnectProvider.source)
+            .first()
+        )
+        if account is None:
+            account = AthleteSourceAccount(
+                athlete_id=athlete_uuid,
+                source=GarminConnectProvider.source,
+                display_name="Garmin Connect (API Personal)",
+            )
+            db.add(account)
+        account.auth_json = {"key_env": (account.auth_json or {}).get("key_env", DEFAULT_KEY_ENV)}
+        db.flush()
+
+        provider = GarminConnectProvider(
+            api_key=secret.get_secret_value() if secret else None,
+            include_wellness=not no_wellness,
+        )
+        summary = IngestionOrchestrator(db).run(
+            account,
+            provider,
+            mode="incremental" if incremental else "initial",
+            start=from_date.date() if from_date else None,
+            end=to_date.date() if to_date else None,
+        )
+        db.commit()
+        click.echo(
+            f"{summary.source} [{summary.mode}] created={summary.created} "
+            f"linked={summary.linked} review={summary.reviewed} "
+            f"reimported={summary.reimported} failed={summary.failed} "
+            f"wellness_days={summary.wellness} wellness_metrics={summary.wellness_metrics} "
+            f"auth={account.auth_status} health={account.health}"
         )
         for err in summary.errors:
             click.echo(f"  error: {err}", err=True)

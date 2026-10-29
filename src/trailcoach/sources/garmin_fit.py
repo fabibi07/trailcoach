@@ -54,6 +54,24 @@ GARMIN_FIT_CAPABILITIES: list[tuple[str, str, str | None]] = [
 CURSOR_KEY = "last_start_time_utc"
 
 
+def fit_payload(
+    parser: FitParser, doc: FitDocument, content: bytes, sa_id: str, extension: str = ".fit"
+) -> ActivityPayload:
+    """Construye el `ActivityPayload` de un FIT ya parseado (compartido por fuentes FIT)."""
+    return ActivityPayload(
+        source_activity_id=sa_id,
+        raw_content=content,
+        raw_kind="fit",
+        raw_extension=extension,
+        raw_content_type="application/vnd.ant.fit",
+        stream_rows=doc.canonical_stream_rows(),
+        intervals=parser.build_intervals(None, doc),
+        device=doc.device.to_dict(),
+        metrics=parser.build_source_metrics(doc),
+        zone_times=parser.build_zone_times(doc),
+    )
+
+
 @SourceProviderRegistry.register
 class GarminFitProvider(SourceProvider):
     source = "garmin_fit"
@@ -96,18 +114,7 @@ class GarminFitProvider(SourceProvider):
         return doc.natural_id() or doc.sha256
 
     def _payload(self, doc: FitDocument, content: bytes, sa_id: str) -> ActivityPayload:
-        return ActivityPayload(
-            source_activity_id=sa_id,
-            raw_content=content,
-            raw_kind="fit",
-            raw_extension=self.extension,
-            raw_content_type="application/vnd.ant.fit",
-            stream_rows=doc.canonical_stream_rows(),
-            intervals=self.parser.build_intervals(None, doc),
-            device=doc.device.to_dict(),
-            metrics=self.parser.build_source_metrics(doc),
-            zone_times=self.parser.build_zone_times(doc),
-        )
+        return fit_payload(self.parser, doc, content, sa_id, self.extension)
 
     def _build_result(
         self,

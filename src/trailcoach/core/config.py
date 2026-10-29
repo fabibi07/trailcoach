@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
 
 
@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
     encryption_key: bytes | None = Field(default=None, alias="ENCRYPTION_KEY")
+
+    # API key personal de Garmin Connect; nunca se guarda en la base de datos
+    garmin_personal_api_key: SecretStr | None = Field(
+        default=None, alias="GARMIN_PERSONAL_API_KEY"
+    )
 
     class Config:
         env_file = ".env"

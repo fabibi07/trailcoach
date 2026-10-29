@@ -28,12 +28,18 @@ from trailcoach.db.models import (
     MetricCapability,
     SourceActivity,
     WellnessDaily,
+    WellnessSourceMetric,
 )
 from trailcoach.dedup.engine import DedupeAction, DedupeEngine
 from trailcoach.ingest.raw_store import RawStore
 from trailcoach.ingest.streams import write_stream_parquet
 from trailcoach.provenance import DataLineage
-from trailcoach.sources.provider import ActivityPayload, ImportResult, SourceProvider
+from trailcoach.sources.provider import (
+    ActivityPayload,
+    ImportResult,
+    SourceProvider,
+    WellnessPayload,
+)
 
 
 def add_payload_metrics(
@@ -63,6 +69,7 @@ class IngestSummary:
     reimported: int = 0
     failed: int = 0
     wellness: int = 0
+    wellness_metrics: int = 0
     errors: list[str] = field(default_factory=list)
     activity_ids: list[uuid.UUID] = field(default_factory=list)
     review_ids: list[uuid.UUID] = field(default_factory=list)
@@ -70,6 +77,16 @@ class IngestSummary:
     @property
     def processed(self) -> int:
         return self.created + self.linked + self.reviewed + self.reimported + self.failed
+
+
+_WELLNESS_MERGE_SKIP = {
+    "quality_flags",
+    "provenance",
+    "raw_file_id",
+    "data_quality",
+    "created_at",
+    "updated_at",
+}
 
 
 class IngestionOrchestrator:
@@ -131,6 +148,20 @@ class IngestionOrchestrator:
         for record in result.wellness_records:
             self._upsert_wellness(account, record)
             summary.wellness += 1
+
+        wellness_days: set[date] = set()
+        for wellness_payload in result.wellness_payloads:
+            savepoint = self.db.begin_nested()
+            try:
+                days, n_metrics = self._ingest_wellness_payload(account, wellness_payload)
+                savepoint.commit()
+            except Exception as exc:  # noqa: BLE001 - un registro malo no aborta el lote
+                savepoint.rollback()
+                summary.errors.append(f"wellness {wellness_payload.name}: {exc}")
+                continue
+            wellness_days |= days
+            summary.wellness_metrics += n_metrics
+        summary.wellness += len(wellness_days)
 
         if result.cursor:
             account.cursor_json = {**(account.cursor_json or {}), **result.cursor}
@@ -347,10 +378,103 @@ class IngestionOrchestrator:
                 existing.notes = cap.notes
         self.db.flush()
 
-    def _upsert_wellness(self, account: AthleteSourceAccount, record: WellnessDaily) -> None:
+    def _upsert_wellness(
+        self,
+        account: AthleteSourceAccount,
+        record: WellnessDaily,
+        raw_file_id: uuid.UUID | None = None,
+        raw_name: str | None = None,
+    ) -> None:
+        """Inserta o completa el día: los campos `None` no borran valores previos."""
         record.athlete_id = account.athlete_id
         record.source = account.source
-        self.db.merge(record)
+        record.account_id = account.id
+        existing = self.db.get(WellnessDaily, (record.athlete_id, record.date, record.source))
+        target = existing if existing is not None else record
+        if existing is not None:
+            for column in WellnessDaily.__table__.columns:
+                if column.primary_key or column.name in _WELLNESS_MERGE_SKIP:
+                    continue
+                value = getattr(record, column.key)
+                if value is not None:
+                    setattr(existing, column.key, value)
+            existing.quality_flags = list(record.quality_flags or [])
+            if record.data_quality:
+                existing.data_quality = record.data_quality
+        provenance = {**((existing.provenance if existing else None) or {})}
+        provenance.update(record.provenance or {})
+        if raw_file_id is not None:
+            target.raw_file_id = target.raw_file_id or raw_file_id
+            if raw_name:
+                provenance["raw_file_ids"] = {
+                    **provenance.get("raw_file_ids", {}),
+                    raw_name: str(raw_file_id),
+                }
+        target.provenance = provenance
+        if existing is None:
+            self.db.add(record)
+        self.db.flush()
+
+    def _ingest_wellness_payload(
+        self, account: AthleteSourceAccount, payload: WellnessPayload
+    ) -> tuple[set[date], int]:
+        """Guarda el RAW del bienestar y persiste días y métricas enlazados a él."""
+        raw_file_id: uuid.UUID | None = None
+        if payload.raw_content is not None:
+            raw = self.raw_store.store(
+                self.db,
+                content=payload.raw_content,
+                source=account.source,
+                kind=payload.raw_kind,
+                athlete_id=account.athlete_id,
+                content_type=payload.raw_content_type,
+                extension=payload.raw_extension,
+                captured_at=(
+                    datetime.combine(payload.captured_at, datetime.min.time(), timezone.utc)
+                    if payload.captured_at
+                    else None
+                ),
+            )
+            raw.parse_status = "ok"
+            raw_file_id = raw.id
+        days: set[date] = set()
+        for record in payload.records:
+            self._upsert_wellness(account, record, raw_file_id, payload.name)
+            days.add(record.date)
+        for metric in payload.metrics:
+            self._upsert_wellness_metric(account, metric, raw_file_id)
+            days.add(metric.date)
+        return days, len(payload.metrics)
+
+    def _upsert_wellness_metric(
+        self,
+        account: AthleteSourceAccount,
+        metric: WellnessSourceMetric,
+        raw_file_id: uuid.UUID | None,
+    ) -> None:
+        existing = (
+            self.db.query(WellnessSourceMetric)
+            .filter_by(
+                athlete_id=account.athlete_id,
+                date=metric.date,
+                source=account.source,
+                metric=metric.metric,
+            )
+            .first()
+        )
+        target = existing or metric
+        if existing is not None:
+            existing.value = metric.value
+            existing.unit = metric.unit
+            existing.value_type = metric.value_type or existing.value_type
+            existing.source_field = metric.source_field
+        target.athlete_id = account.athlete_id
+        target.source = account.source
+        target.account_id = account.id
+        target.raw_file_id = raw_file_id
+        if existing is None:
+            self.db.add(metric)
+        self.db.flush()
 
     @staticmethod
     def _mark_failure(account: AthleteSourceAccount, now: datetime) -> None:

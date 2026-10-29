@@ -71,3 +71,30 @@ local directory of exported `.fit` files (`auth_json.import_dir`), with no
 Garmin API or credentials. `source_activity_id` is `<serial>-<time_created>`
 from the FIT `file_id` message (falls back to the SHA256 of the file), so
 re-exporting the same activity is an idempotent `REIMPORT`.
+
+### `GarminConnectProvider` (`garmin_connect`, P0.2)
+
+Proveedor de la API Personal oficial de Garmin Connect (solo *pull*). Es una
+fuente distinta de `garmin_fit`: la API entrega el **mismo FIT original** del
+reloj (verificado byte a byte), que se parsea con el mismo `FitParser`.
+
+- **Actividades:** se listan en páginas de 100, se descarga el ZIP de cada FIT
+  (`Accept: */*`) y se construye el mismo `ActivityPayload` que `garmin_fit`
+  (`fit_payload`). `source_activity_id` es el `activityId` de Garmin. Contra
+  un export local la deduplicación produce `AUTO_LINK`, y el `RawStore`
+  reutiliza el `RawFile` existente porque el SHA-256 es idéntico.
+- **Bienestar:** resumen diario (≤365 días por llamada), sueño (≤31 días) y
+  HRV (≤365 días). Cada respuesta JSON es un `WellnessPayload`: el
+  orquestador guarda el RAW (`kind="wellness_json"`) y enlaza a él los días
+  (`WellnessDaily`, columnas canónicas) y las métricas extra
+  (`WellnessSourceMetric`: pasos, estrés, etapas de sueño, línea base HRV...).
+  Los campos `None` no borran valores ya guardados; el día en curso queda
+  `data_quality="partial"` con `day_in_progress`.
+- **Credencial:** la API key nunca se guarda en la base de datos;
+  `auth_json` solo contiene `{"key_env": "GARMIN_PERSONAL_API_KEY"}`. El JWT
+  (~24 h) vive en memoria. HTTP 401/403 → `auth_status="expired_or_revoked"`
+  y `health="error"`.
+- **No disponible en la API:** Training Readiness, Training Status, historial
+  de VO2max, predicciones de carrera y Health Snapshots.
+- CLI: `trailcoach ingest-garmin-connect --athlete-id ... [--from-date
+  --to-date] [--incremental] [--no-wellness]`.
