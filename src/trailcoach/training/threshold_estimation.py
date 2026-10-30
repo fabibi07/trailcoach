@@ -34,7 +34,14 @@ PACE_LOOKBACK_DAYS = 90
 RESTING_MIN_DAYS = 7
 LTHR_WARN_DIFF_BPM = 5.0
 
+SPEED_MAX_VALID = 7.0
+ACCEL_MAX_MPS2 = 3.0
+POWER_MAX_VALID = 1500.0
+FTP_FROM_20MIN = 0.95
+MIN_20MIN_ACTIVITIES = 3
+
 RUN_SPORTS = {"running", "trail_running"}
+INDOOR_SUB_SPORTS = {"treadmill", "indoor_running", "virtual_activity"}
 NON_ROAD_SUB_SPORTS = {"treadmill", "indoor_running", "virtual_activity", "trail"}
 
 DEVICE_METRICS = {
@@ -51,13 +58,14 @@ UNITS = {
     "ftp_pace_mps": "m/s",
 }
 # D1: orden de preferencia entre candidatos automáticos (los manuales siempre ganan).
-# LTHR prefiere el valor del dispositivo (D3); el derivado solo valida.
+# Cada entrada es un `method` o un `source`. LTHR prefiere el dispositivo (D3);
+# FTP de potencia prefiere el derivado (E4); ritmo prefiere tramos a LTHR (D5, E1).
 PREFERENCE = {
     "hr_max_bpm": ["derived", "device"],
     "lthr_bpm": ["device", "derived"],
     "resting_hr_bpm": ["derived", "device"],
-    "ftp_power_w": ["device"],
-    "ftp_pace_mps": ["derived"],
+    "ftp_power_w": ["power_20min_x0.95_90d", "device"],
+    "ftp_pace_mps": ["lthr_segments_90d", "gap_20min_x0.95_90d"],
 }
 # D7: cambio mínimo para versionar (absoluto en ppm, relativo en el resto).
 MIN_CHANGE_ABS = {"hr_max_bpm": 2.0, "lthr_bpm": 2.0, "resting_hr_bpm": 2.0}
@@ -73,6 +81,8 @@ class ActivityEvidence:
     sub_sport: str | None = None
     max_hr_30s: float | None = None
     best_hr_20min: float | None = None
+    best_gap_20min: float | None = None
+    best_power_20min: float | None = None
     device: dict[str, float] = field(default_factory=dict)
     t_s: np.ndarray | None = None
     hr_bpm: np.ndarray | None = None
@@ -81,6 +91,10 @@ class ActivityEvidence:
     @property
     def is_run(self) -> bool:
         return self.sport in RUN_SPORTS
+
+    @property
+    def is_outdoor_run(self) -> bool:
+        return self.is_run and (self.sub_sport or "") not in INDOOR_SUB_SPORTS
 
     @property
     def is_road_run(self) -> bool:
@@ -145,6 +159,28 @@ def best_mean(t_s: np.ndarray, values: np.ndarray, window_s: float) -> float | N
         if best is None or mean > best:
             best = float(mean)
     return best
+
+
+def guard_speed(t_s: np.ndarray, speed: np.ndarray) -> np.ndarray:
+    """E2: máscara de velocidades plausibles (descarta picos de GPS)."""
+    ok: np.ndarray = np.isfinite(speed) & (speed >= 0) & (speed <= SPEED_MAX_VALID)
+    if len(speed) > 1:
+        dt = np.diff(t_s)
+        accel = np.abs(np.diff(speed)) / np.where(dt > 0, dt, np.inf)
+        ok[1:] &= accel <= ACCEL_MAX_MPS2
+    return ok
+
+
+def best_gap_20min(t_s: np.ndarray, speed: np.ndarray, gap: np.ndarray) -> float | None:
+    """Mejor media de 20 min del ritmo ajustado por pendiente, con guarda E2."""
+    ok = guard_speed(t_s, speed) & np.isfinite(gap)
+    return best_mean(t_s[ok], gap[ok], LTHR_WINDOW_S)
+
+
+def best_power_20min(t_s: np.ndarray, power: np.ndarray) -> float | None:
+    """Mejor media de 20 min de potencia (muestras fuera de rango descartadas)."""
+    ok = np.isfinite(power) & (power >= 0) & (power <= POWER_MAX_VALID)
+    return best_mean(t_s[ok], power[ok], LTHR_WINDOW_S)
 
 
 def hr_summary(t_s: np.ndarray, hr: np.ndarray) -> tuple[float | None, float | None]:
@@ -280,6 +316,9 @@ def estimate(
                 )
             )
 
+        outdoor = _window(acts, end, PACE_LOOKBACK_DAYS)
+        cands += _best20_candidates(month, outdoor)
+
         lthr_pick = _pick([c for c in cands if c.kind == "lthr_bpm"], "lthr_bpm")
         if lthr_pick is not None:
             monthly_lthr[month] = lthr_pick.value
@@ -298,6 +337,36 @@ def estimate(
         result.candidates.extend(cands)
     result.effective = select_effective(result.candidates)
     return result
+
+
+def _best20_candidates(month: date, acts: list[ActivityEvidence]) -> list[Candidate]:
+    """E1 y E4: mejores 20 min (GAP y potencia) × 0,95 en carreras al aire libre."""
+    out = []
+    for kind, attr, unit, method, conf in (
+        ("ftp_pace_mps", "best_gap_20min", "m/s", "gap_20min_x0.95_90d", 0.5),
+        ("ftp_power_w", "best_power_20min", "W", "power_20min_x0.95_90d", 0.6),
+    ):
+        vals = [(getattr(e, attr), e.day) for e in acts if e.is_outdoor_run and getattr(e, attr)]
+        if len(vals) < MIN_20MIN_ACTIVITIES:
+            continue
+        best, day = max(vals)
+        out.append(
+            Candidate(
+                kind,
+                month,
+                round(best * FTP_FROM_20MIN, 4 if unit == "m/s" else 1),
+                unit,
+                method,
+                "derived",
+                conf,
+                {
+                    "n_activities": len(vals),
+                    "best_20min": round(best, 4),
+                    "best_day": day.isoformat(),
+                },
+            )
+        )
+    return out
 
 
 def _last(values: dict[date, float]) -> float | None:
@@ -325,7 +394,11 @@ def _pace_candidate(month: date, acts: list[ActivityEvidence], lthr: float) -> C
 
 def _pick(cands: list[Candidate], kind: str) -> Candidate | None:
     order = PREFERENCE.get(kind, [])
-    ranked = sorted((c for c in cands if c.source in order), key=lambda c: order.index(c.source))
+
+    def rank(c: Candidate) -> int:
+        return order.index(c.method) if c.method in order else order.index(c.source)
+
+    ranked = sorted((c for c in cands if c.method in order or c.source in order), key=rank)
     return ranked[0] if ranked else None
 
 

@@ -20,11 +20,14 @@ from trailcoach.db.models import (
     WellnessDaily,
 )
 from trailcoach.sources.priority import resolve_source_for_metric
+from trailcoach.training.grade import add_grade_to_dataframe, grade_adjusted_speed
 from trailcoach.training.threshold_estimation import (
     DEVICE_METRICS,
     ActivityEvidence,
     Candidate,
     EstimationResult,
+    best_gap_20min,
+    best_power_20min,
     estimate,
     hr_summary,
 )
@@ -140,11 +143,26 @@ def _read_stream(path: str) -> pl.DataFrame | None:
     if not full.exists():
         return None
     df = pl.read_parquet(full)
-    if "t_s" not in df.columns or "hr_bpm" not in df.columns:
+    if "t_s" not in df.columns:
         return None
-    if "speed_mps" not in df.columns:
-        df = df.with_columns(pl.lit(None, dtype=pl.Float64).alias("speed_mps"))
-    return df.select("t_s", "hr_bpm", "speed_mps").drop_nulls(["t_s", "hr_bpm"]).sort("t_s")
+    df = add_grade_to_dataframe(df)
+    for col in ("hr_bpm", "speed_mps", "power_w", "grade_pct"):
+        if col not in df.columns:
+            df = df.with_columns(pl.lit(None, dtype=pl.Float64).alias(col))
+    df = df.with_columns(
+        pl.struct("speed_mps", "grade_pct")
+        .map_elements(
+            lambda r: grade_adjusted_speed(r["speed_mps"], r["grade_pct"]),
+            return_dtype=pl.Float64,
+        )
+        .alias("gap_mps")
+    )
+    cols = ("t_s", "hr_bpm", "speed_mps", "gap_mps", "power_w")
+    return df.select(*cols).drop_nulls(["t_s"]).sort("t_s")
+
+
+def _arr(df: pl.DataFrame, col: str) -> np.ndarray:
+    return df[col].cast(pl.Float64).fill_null(np.nan).to_numpy()
 
 
 def collect_threshold_inputs(
@@ -188,12 +206,18 @@ def collect_threshold_inputs(
         path = streams.get(activity.id)
         df = _read_stream(path) if ev.is_run and path else None
         if df is not None and df.height > 1:
-            t = df["t_s"].to_numpy().astype(float)
-            hr = df["hr_bpm"].to_numpy().astype(float)
-            ev.max_hr_30s, ev.best_hr_20min = hr_summary(t, hr)
-            if ev.is_road_run:
-                ev.t_s, ev.hr_bpm = t, hr
-                ev.speed_mps = df["speed_mps"].fill_null(np.nan).to_numpy().astype(float)
+            t = _arr(df, "t_s")
+            hr = _arr(df, "hr_bpm")
+            if np.isfinite(hr).any():
+                ok = np.isfinite(hr)
+                ev.max_hr_30s, ev.best_hr_20min = hr_summary(t[ok], hr[ok])
+            speed = _arr(df, "speed_mps")
+            if ev.is_outdoor_run:
+                ev.best_gap_20min = best_gap_20min(t, speed, _arr(df, "gap_mps"))
+                ev.best_power_20min = best_power_20min(t, _arr(df, "power_w"))
+            if ev.is_road_run and np.isfinite(hr).any():
+                ok = np.isfinite(hr)
+                ev.t_s, ev.hr_bpm, ev.speed_mps = t[ok], hr[ok], speed[ok]
         evidence.append(ev)
 
     wellness = (

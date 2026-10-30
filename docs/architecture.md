@@ -114,3 +114,21 @@ reloj (verificado byte a byte), que se parsea con el mismo `FitParser`.
   no se modifican. Versionado mensual solo si cambia ≥ 2 ppm o ≥ 2 %.
 - `trailcoach estimate-thresholds --athlete-id ... [--apply]` es idempotente:
   reemplaza solo filas `derived`/`device`; un manual gana desde su `valid_from`.
+
+## Ritmo umbral y sincronización diaria (P0.4)
+
+- **Ritmo umbral (`ftp_pace_mps`):** preferencia `lthr_segments_90d` (tramos ≥ 8 min a LTHR ± 3, D5)
+  y, si no hay 3 tramos, `gap_20min_x0.95_90d`: mejor media de 20 min del ritmo ajustado por
+  pendiente (GAP) en 90 días × 0,95, con al menos 3 carreras al aire libre (sin cinta/indoor).
+- **Guarda de velocidad:** se descartan, solo para estimar, velocidades > 7 m/s y aceleraciones
+  > 3 m/s². Los streams no se modifican.
+- **FTP de potencia (`ftp_power_w`):** el derivado `power_20min_x0.95_90d` gana al ajuste del
+  dispositivo; ambos quedan en `threshold_estimate`.
+- **Carga principal:** ruta/pista usa rTSS; trail usa HRSS (rTSS queda como métrica secundaria).
+- **Test manual de 30 min:** calentar, correr 30 min al máximo esfuerzo sostenible en terreno
+  plano, tomar el ritmo medio de los últimos 20 min y cargarlo con
+  `trailcoach set-threshold --kind ftp_pace_mps --value <m/s> --source manual`. El manual gana
+  siempre.
+- **Sincronización diaria:** `trailcoach sync-daily --athlete-id ...` encadena
+  `ingest-garmin-connect --incremental`, `estimate-thresholds --apply` y `recalculate`. Se programa
+  una vez al día (cron o Programador de tareas de Windows).

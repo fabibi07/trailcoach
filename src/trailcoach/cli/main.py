@@ -376,7 +376,8 @@ def recalculate(athlete_id: str, from_date: datetime | None):
             missing = ", ".join(result["missing_threshold_kinds"]) or "-"
             click.echo(
                 f"AVISO: {result['activities_without_load']} actividades sin carga; "
-                f"umbrales faltantes: {missing}. Usa `trailcoach seed-thresholds`.",
+                f"umbrales faltantes: {missing}. Usa `trailcoach estimate-thresholds --apply` "
+                f"o `set-threshold --source manual`.",
                 err=True,
             )
     except Exception:
@@ -384,6 +385,26 @@ def recalculate(athlete_id: str, from_date: datetime | None):
         raise
     finally:
         db.close()
+
+
+@cli.command("sync-daily")
+@click.option("--athlete-id", required=True, help="UUID del atleta.")
+@click.pass_context
+def sync_daily(ctx: click.Context, athlete_id: str):
+    """Sincronización diaria: importa lo nuevo, re-estima umbrales y recalcula la carga.
+
+    Pensado para ejecutarse una vez al día (cron o Programador de tareas).
+    """
+    ctx.invoke(
+        ingest_garmin_connect,
+        athlete_id=athlete_id,
+        incremental=True,
+        from_date=None,
+        to_date=None,
+        no_wellness=False,
+    )
+    ctx.invoke(estimate_thresholds_cmd, athlete_id=athlete_id, apply_=True)
+    ctx.invoke(recalculate, athlete_id=athlete_id, from_date=None)
 
 
 @cli.command()
