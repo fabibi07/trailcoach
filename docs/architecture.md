@@ -98,3 +98,19 @@ reloj (verificado byte a byte), que se parsea con el mismo `FitParser`.
   de VO2max, predicciones de carrera y Health Snapshots.
 - CLI: `trailcoach ingest-garmin-connect --athlete-id ... [--from-date
   --to-date] [--incremental] [--no-wellness]`.
+
+## Umbrales del atleta (P0.3)
+
+- `threshold_estimate` guarda **todos** los candidatos mensuales de cada umbral
+  (`kind`, `valid_from`, `value`, `method`, `source`, `confidence`, `evidence`).
+- `athlete_threshold` guarda solo el valor efectivo; `source` = `manual`, `derived`
+  o `device` y `notes` = `method` del candidato elegido (trazabilidad).
+- `training/threshold_estimation.py`: funciones puras sobre streams, ajustes
+  `device_*` neutrales (`activity_source_metric`) y `WellnessDaily.resting_hr`
+  (fuente según `SourcePriority`). Sin lógica por proveedor.
+- Prioridad: manual > (derivado | dispositivo según `PREFERENCE`). LTHR prefiere
+  el dispositivo; el derivado (mejor 20 min × 0,95) solo genera avisos.
+- Guarda de pulso (30–220 ppm, saltos > 8 ppm/s) solo para estimar; los streams
+  no se modifican. Versionado mensual solo si cambia ≥ 2 ppm o ≥ 2 %.
+- `trailcoach estimate-thresholds --athlete-id ... [--apply]` es idempotente:
+  reemplaza solo filas `derived`/`device`; un manual gana desde su `valid_from`.

@@ -117,9 +117,7 @@ def _compute_rtss(
     df = add_grade_to_dataframe(df)
     speed = df["speed_mps"].to_list()
     grades = df["grade_pct"].to_list() if "grade_pct" in df.columns else [0.0] * len(speed)
-    gap_values = [
-        grade_adjusted_speed(s, g) for s, g in zip(speed, grades, strict=False)
-    ]
+    gap_values = [grade_adjusted_speed(s, g) for s, g in zip(speed, grades, strict=False)]
     df = df.with_columns(pl.Series("gap_mps", gap_values, dtype=pl.Float64))
     gap_rolling = df["gap_mps"].rolling_mean(window_size=ROLLING_SECONDS, min_samples=1)
     df = df.with_columns(gap_rolling.alias("gap_rolling_mps"))
@@ -252,9 +250,7 @@ def compute_activity_load(
 
     if None not in (lthr, hr_max, hr_rest):
         assert lthr is not None and hr_max is not None and hr_rest is not None
-        hrss, trimp = _compute_hrss_trimp(
-            activity, df, athlete.sex, hr_max, hr_rest, lthr
-        )
+        hrss, trimp = _compute_hrss_trimp(activity, df, athlete.sex, hr_max, hr_rest, lthr)
         if hrss is not None:
             available["HRSS"] = hrss
         if trimp is not None:

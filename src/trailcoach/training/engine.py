@@ -60,9 +60,7 @@ def _recompute_activity_loads(
 
     for activity in activities:
         stream_set = (
-            db.query(ActivityStreamSet)
-            .filter(ActivityStreamSet.activity_id == activity.id)
-            .first()
+            db.query(ActivityStreamSet).filter(ActivityStreamSet.activity_id == activity.id).first()
         )
         if stream_set is None:
             continue
@@ -139,9 +137,7 @@ def _recompute_daily_loads(
                 "duration_s"
             ),
             func.count(Activity.id).label("n_activities"),
-            func.max(
-                case((Activity.data_quality == "degraded", 1), else_=0)
-            ).label("has_degraded"),
+            func.max(case((Activity.data_quality == "degraded", 1), else_=0)).label("has_degraded"),
         )
         .filter(*activity_filter)
         .group_by(activity_day())
@@ -167,9 +163,9 @@ def _recompute_daily_loads(
 
     for mrow in method_rows:
         d = _to_date(mrow.day)
-        daily_map[d]["load_by_method"][mrow.method] = (
-            daily_map[d]["load_by_method"].get(mrow.method, 0.0) + float(mrow.value or 0.0)
-        )
+        daily_map[d]["load_by_method"][mrow.method] = daily_map[d]["load_by_method"].get(
+            mrow.method, 0.0
+        ) + float(mrow.value or 0.0)
 
     for srow in summary_rows:
         d = _to_date(srow.day)
@@ -247,9 +243,9 @@ def recalculate_athlete(
         db.commit()
 
     n_daily = db.query(DailyLoad).filter(DailyLoad.athlete_id == athlete_id).count()
-    n_metrics = db.query(TrainingMetricDaily).filter(
-        TrainingMetricDaily.athlete_id == athlete_id
-    ).count()
+    n_metrics = (
+        db.query(TrainingMetricDaily).filter(TrainingMetricDaily.athlete_id == athlete_id).count()
+    )
     return {
         "athlete_id": str(athlete_id),
         "daily_load_rows": n_daily,

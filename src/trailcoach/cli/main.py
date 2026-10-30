@@ -19,7 +19,7 @@ from trailcoach.sources.garmin_connect import DEFAULT_KEY_ENV, GarminConnectProv
 from trailcoach.sources.garmin_fit import GarminFitProvider
 from trailcoach.sources.registry import SourceProviderRegistry
 from trailcoach.training.engine import recalculate_athlete
-from trailcoach.training.thresholds import set_threshold
+from trailcoach.training.thresholds import estimate_and_apply, set_threshold
 
 
 @click.group()
@@ -245,6 +245,34 @@ def reprocess_raw(athlete_id: str, source: str):
     except Exception:
         db.rollback()
         raise
+    finally:
+        db.close()
+
+
+@cli.command("estimate-thresholds")
+@click.option("--athlete-id", required=True, help="UUID del atleta.")
+@click.option("--apply", "apply_", is_flag=True, help="Guarda candidatos y umbrales efectivos.")
+def estimate_thresholds_cmd(athlete_id: str, apply_: bool):
+    """Estima umbrales (FC máx, LTHR, FC reposo, FTP, ritmo umbral) desde tus datos."""
+    db = SessionLocal()
+    try:
+        summary = estimate_and_apply(db, UUID(athlete_id), apply=apply_)
+        if apply_:
+            db.commit()
+        click.echo(f"candidatos={len(summary.result.candidates)} efectivos={len(summary.written)}")
+        for c in summary.written:
+            line = f"  {c.kind:<15} {c.valid_from:%Y-%m}  {c.value:g} {c.unit}"
+            click.echo(f"{line}  ({c.source}/{c.method})")
+        if summary.blocked_by_manual:
+            click.echo(f"omitidos por umbral manual: {summary.blocked_by_manual}")
+        if summary.result.warnings:
+            click.echo(f"AVISOS ({len(summary.result.warnings)}):", err=True)
+            for w in summary.result.warnings:
+                click.echo(f"  {w}", err=True)
+        if apply_:
+            click.echo("Umbrales guardados. Ejecuta `trailcoach recalculate` para las cargas.")
+        else:
+            click.echo("Simulación: no se guardó nada (usa --apply).")
     finally:
         db.close()
 

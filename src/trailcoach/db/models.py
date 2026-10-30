@@ -55,6 +55,32 @@ class AthleteThreshold(Base):
     __table_args__ = (UniqueConstraint("athlete_id", "kind", "valid_from"),)
 
 
+class ThresholdEstimate(Base):
+    """Candidato a umbral del atleta con su origen y evidencia.
+
+    `athlete_threshold` guarda solo el valor efectivo elegido; aquí quedan
+    todos los candidatos (derivados de los datos o declarados por el
+    dispositivo) para que cada umbral efectivo sea trazable.
+    """
+
+    __tablename__ = "threshold_estimate"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    athlete_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("athlete.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    valid_from: Mapped[date] = mapped_column(Date, nullable=False)
+    value: Mapped[float] = mapped_column(Numeric(12, 6), nullable=False)
+    unit: Mapped[str] = mapped_column(String(16), nullable=False)
+    method: Mapped[str] = mapped_column(String(48), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Numeric(3, 2))
+    evidence: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+    __table_args__ = (UniqueConstraint("athlete_id", "kind", "valid_from", "method"),)
+
+
 class AthleteZone(Base):
     __tablename__ = "athlete_zone"
 

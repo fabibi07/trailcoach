@@ -97,9 +97,7 @@ def recalculate_pmc(
         atl_ascent += (vload - atl_ascent) * k_atl
 
         last7 = [
-            float(
-                (load_map.get(d - timedelta(days=i), DailyLoad()).load_primary) or 0.0
-            )
+            float((load_map.get(d - timedelta(days=i), DailyLoad()).load_primary) or 0.0)
             for i in range(7)
         ]
         monotony, strain = _weekly_monotony_and_strain(last7)
