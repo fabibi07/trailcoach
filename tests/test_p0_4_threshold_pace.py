@@ -70,6 +70,7 @@ def test_carga_principal_por_deporte():
     both = {"rTSS": 1.0, "HRSS": 2.0}
     assert _primary_method("trail_running", both) == "HRSS"
     assert _primary_method("running", both) == "rTSS"
+    assert _primary_method("walking", both) == "HRSS"
     assert _primary_method("trail_running", {"rTSS": 1.0}) == "rTSS"
 
 

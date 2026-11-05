@@ -100,8 +100,9 @@ def _threshold_refs(thresholds: dict[str, AthleteThreshold]) -> dict[str, Any]:
 def _primary_method(sport: str, available: dict[str, Any]) -> str | None:
     if sport == "cycling" and "TSS_power" in available:
         return "TSS_power"
-    # E3 (P0.4): en trail la GAP no capta el terreno técnico; manda el pulso.
-    if sport == "trail_running" and "HRSS" in available:
+    # E3 (P0.4): rTSS manda solo en carrera de ruta/pista; en trail, caminata y
+    # otros deportes el ritmo umbral de carrera no aplica y manda el pulso.
+    if sport != "running" and "HRSS" in available:
         return "HRSS"
     if "rTSS" in available:
         return "rTSS"
