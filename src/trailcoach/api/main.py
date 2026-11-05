@@ -9,6 +9,7 @@ import polars as pl
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import func
 
 from trailcoach.db.models import (
     Activity,
@@ -23,6 +24,7 @@ from trailcoach.db.models import (
 )
 from trailcoach.db.session import SessionLocal, get_db
 from trailcoach.training.engine import activity_day
+from trailcoach.training.insights import build_insights
 from trailcoach.training.thresholds import get_thresholds
 
 
@@ -359,6 +361,42 @@ def athlete_state():
             }
 
         thresholds = get_thresholds(db, athlete.id, today)
+        last_7d = _aggregate(week_start)
+        last_28d = _aggregate(month_start)
+
+        best_pace = (
+            db.query(func.max(AthleteThreshold.value))
+            .filter(
+                AthleteThreshold.athlete_id == athlete.id,
+                AthleteThreshold.kind == "ftp_pace_mps",
+                AthleteThreshold.valid_from >= today - timedelta(days=365),
+                AthleteThreshold.valid_from <= today,
+            )
+            .scalar()
+        )
+        last_activity = (
+            db.query(func.max(DailyLoad.date))
+            .filter(
+                DailyLoad.athlete_id == athlete.id,
+                DailyLoad.n_activities > 0,
+                DailyLoad.date <= today,
+            )
+            .scalar()
+        )
+        pace = thresholds.get("ftp_pace_mps")
+        insights = build_insights(
+            today=today,
+            tsb=float(pmc.tsb) if pmc and pmc.tsb is not None else None,
+            ramp_rate_7d=(
+                float(pmc.ramp_rate_7d) if pmc and pmc.ramp_rate_7d is not None else None
+            ),
+            load_7d=last_7d["load"],
+            load_28d=last_28d["load"],
+            ftp_pace_mps=float(pace.value) if pace else None,
+            ftp_pace_best_365d_mps=float(best_pace) if best_pace is not None else None,
+            ftp_pace_source=pace.source if pace else None,
+            last_activity=last_activity,
+        )
 
         return {
             "as_of": today.isoformat(),
@@ -375,8 +413,10 @@ def athlete_state():
             }
             if pmc
             else None,
-            "last_7d": _aggregate(week_start),
-            "last_28d": _aggregate(month_start),
+            "ramp_rate_7d": pmc.ramp_rate_7d if pmc else None,
+            "last_7d": last_7d,
+            "last_28d": last_28d,
+            "insights": insights,
             "thresholds_active": {
                 kind: {
                     "value": float(t.value),

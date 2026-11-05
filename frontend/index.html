@@ -41,6 +41,16 @@
     .tag-yellow { background:#f59e0b33; color:var(--warn); }
     .tag-red { background:#ef444433; color:var(--danger); }
     .tag-blue { background:#3b82f633; color:var(--accent); }
+    .help { color:var(--muted); font-size:.8rem; margin:-.25rem 0 .5rem; line-height:1.35; }
+    .help b { color:var(--text); font-weight:600; }
+    .insights { display:flex; flex-direction:column; gap:.5rem; }
+    .insight { border-left:4px solid var(--muted); background:#0f172a66; border-radius:.4rem; padding:.5rem .75rem; }
+    .insight .t { font-weight:600; margin-bottom:.15rem; }
+    .insight .m { font-size:.85rem; color:#cbd5e1; }
+    .insight.ok { border-color:var(--ok); }
+    .insight.info { border-color:var(--accent); }
+    .insight.warn { border-color:var(--warn); }
+    .insight.alert { border-color:var(--danger); }
   </style>
 </head>
 <body>
@@ -53,25 +63,35 @@
   <div id="dashboard" class="tab-content active">
     <div class="grid grid-1">
       <div class="panel" id="athlete-state-panel">
+        <h2>Qué significa hoy</h2>
+        <p class="help">Lectura automática de tu estado, de lo más urgente a lo menos. Verde: bien. Azul: dato útil. Amarillo: atención. Rojo: actúa.</p>
+        <div id="insights" class="insights">Cargando...</div>
+      </div>
+      <div class="panel">
         <h2>Estado del atleta</h2>
+        <p class="help"><b>Fitness</b>: tu carga promedio de ~6 semanas; si sube, ganas base. <b>Fatiga</b>: tu carga de los últimos ~7 días. <b>Forma</b> = fitness − fatiga: negativa = cansado, positiva = fresco. Una sesión de 1 h a ritmo umbral suma ~100 de carga.</p>
         <div id="athlete-state">Cargando...</div>
       </div>
     </div>
     <div class="grid">
       <div class="panel">
-        <h2>PMC (CTL / ATL / TSB)</h2>
+        <h2>Fitness, fatiga y forma</h2>
+        <p class="help"><b>Verde</b> (fitness): debe subir de a poco. <b>Roja</b> (fatiga): picos tras semanas duras. <b>Azul</b> (forma, eje derecho): bajo −10 (zona roja) estás cargando; sobre +25 (zona verde) estás muy descansado. Antes de una carrera busca forma entre +5 y +25.</p>
         <div id="pmc" class="chart"></div>
       </div>
       <div class="panel">
         <h2>Carga semanal</h2>
+        <p class="help"><b>Barras</b>: carga de cada semana. <b>Línea</b>: km. Evita que una semana suba más de un 30 % sobre las anteriores; cada 3-4 semanas conviene una más liviana.</p>
         <div id="weekly-load" class="chart"></div>
       </div>
       <div class="panel">
         <h2>Volumen semanal</h2>
+        <p class="help">Km (barras), horas y desnivel positivo (D+, eje derecho) por semana. En trail, las horas y el D+ dicen más que los km: acércalos a lo que pedirá tu carrera.</p>
         <div id="weekly-volume" class="chart"></div>
       </div>
       <div class="panel">
         <h2>Evolución de umbrales</h2>
+        <p class="help"><b>Ritmo umbral</b> (FTPa, más arriba = más rápido): el ritmo que sostienes ~1 h. <b>LTHR</b>: tu pulso en ese esfuerzo. <b>HRmax / HRrest</b>: pulso máximo y de reposo; si el de reposo sube varios días, puede ser fatiga o enfermedad.</p>
         <div id="thresholds" class="chart"></div>
       </div>
     </div>
@@ -115,6 +135,7 @@
     }
     function fmtDate(iso) { return iso ? new Date(iso).toLocaleDateString('es-CL') : '-'; }
 
+    const TSB_LABELS = { 'very high': 'Muy descansado', 'high': 'Fresco', 'neutral': 'Equilibrio', 'low': 'Bloque de carga', 'very low': 'Sobrecarga', 'unknown': '-' };
     const tsbClass = (label) => {
       if (label === 'very high') return 'tag-blue';
       if (label === 'high') return 'tag-green';
@@ -159,10 +180,17 @@
     async function loadDashboard() {
       const state = await fetch('/v1/athlete-state').then(r => r.json());
       renderAthleteState(state);
+      renderInsights(state.insights || []);
       renderPmc();
       renderWeeklyLoad();
       renderWeeklyVolume();
       renderThresholds();
+    }
+
+    function renderInsights(items) {
+      const el = document.getElementById('insights');
+      if (!items.length) { el.textContent = 'Sin datos suficientes todavía.'; return; }
+      el.innerHTML = items.map(i => `<div class="insight ${i.level}"><div class="t">${i.title}</div><div class="m">${i.message}</div></div>`).join('');
     }
 
     function renderAthleteState(s) {
@@ -174,7 +202,7 @@
         <div class="cards">
           <div class="card">
             <div class="value" style="color:var(--ok)">${fmt(s.fitness?.ctl, 1)}</div>
-            <div class="label">Fitness (CTL)</div>
+            <div class="label">Fitness (CTL)<br><span class="muted">${s.ramp_rate_7d == null ? '' : (s.ramp_rate_7d >= 0 ? '+' : '') + fmt(s.ramp_rate_7d, 1) + ' en 7 días'}</span></div>
           </div>
           <div class="card">
             <div class="value" style="color:var(--danger)">${fmt(s.fatigue?.atl, 1)}</div>
@@ -182,7 +210,7 @@
           </div>
           <div class="card">
             <div class="value">${fmt(s.form?.tsb, 1)}</div>
-            <div class="label">Forma (TSB)<br><span class="tag ${tsbClass(s.form?.label)}">${s.form?.label || '-'}</span></div>
+            <div class="label">Forma (TSB)<br><span class="tag ${tsbClass(s.form?.label)}">${TSB_LABELS[s.form?.label] || '-'}</span></div>
           </div>
           <div class="card">
             <div class="value">${fmt(s.last_7d?.load, 0)}</div>
@@ -210,11 +238,11 @@
           </div>
           <div class="card">
             <div class="value">${ftpPace}</div>
-            <div class="label">FTPa<br><span class="muted">${thresholds.ftp_pace_mps?.valid_from || ''}</span></div>
+            <div class="label">Ritmo umbral (min/km)<br><span class="muted">${thresholds.ftp_pace_mps?.valid_from || ''}</span></div>
           </div>
           <div class="card">
             <div class="value">${lthr}</div>
-            <div class="label">LTHR<br><span class="muted">${thresholds.lthr_bpm?.valid_from || ''}</span></div>
+            <div class="label">FC umbral (LTHR)<br><span class="muted">${thresholds.lthr_bpm?.valid_from || ''}</span></div>
           </div>
         </div>
       `;
