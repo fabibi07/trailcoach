@@ -16,13 +16,14 @@ from trailcoach.core.config import settings
 from trailcoach.db.models import (
     Activity,
     ActivityLoad,
+    ActivitySourceMetric,
     ActivityStreamSet,
     ActivityZoneTime,
     Athlete,
     RaceGoal,
 )
 from trailcoach.db.session import get_db
-from trailcoach.training.best_efforts import DISTANCES_M, best_time_for_distance
+from trailcoach.training.best_efforts import DISTANCES_M, best_time_for_distance, vdot
 from trailcoach.training.engine import activity_day_py
 from trailcoach.training.intensity import decoupling_pct, weekly_distribution, zone_seconds
 from trailcoach.training.race_plan import build_plan
@@ -114,7 +115,13 @@ def activity_metrics(activity_id: UUID) -> dict[str, Any]:
             "lthr": None,
             "decoupling_pct": None,
             "device_hr_zones": [],
+            "device": {},
         }
+        for sm in db.query(ActivitySourceMetric).filter(
+            ActivitySourceMetric.activity_id == activity_id,
+            ActivitySourceMetric.metric.in_(DEVICE_METRICS),
+        ):
+            out["device"].setdefault(sm.metric, float(sm.value))
         zt = (
             db.query(ActivityZoneTime)
             .filter(
@@ -166,6 +173,18 @@ def weekly_intensity(weeks: int = 16) -> list[dict[str, Any]]:
         return weekly_distribution(per)
 
 
+VDOT_KEYS = ("5k", "10k", "21k")
+HIGHER_IS_BETTER = {"20min_mps", "vdot"}
+DEVICE_METRICS = (
+    "aerobic_training_effect",
+    "anaerobic_training_effect",
+    "rpe",
+    "feel_pct",
+    "calories_kcal",
+    "training_load_native",
+)
+
+
 @router.get("/v1/best-efforts")
 def best_efforts(days: int = 730) -> dict[str, Any]:
     """Mejores tiempos por distancia y mejor ritmo de 20 min (carrera en ruta/pista)."""
@@ -187,19 +206,21 @@ def best_efforts(days: int = 730) -> dict[str, Any]:
             if "distance_m" in st:
                 for k, d in DISTANCES_M.items():
                     row[k] = best_time_for_distance(st["t_s"], st["distance_m"], d)
+                vals = [vdot(DISTANCES_M[k], row[k]) for k in VDOT_KEYS if row.get(k) is not None]
+                row["vdot"] = max([v for v in vals if v is not None], default=None)
             if "speed_mps" in st and a.sport == "running":
                 ok = guard_speed(st["t_s"], st["speed_mps"])
                 row["20min_mps"] = best_mean(st["t_s"][ok], st["speed_mps"][ok], 1200)
             efforts.append(row)
 
-        keys = [*DISTANCES_M, "20min_mps"]
+        keys = [*DISTANCES_M, "20min_mps", "vdot"]
         cutoff = (date.today() - timedelta(days=90)).isoformat()
 
         def best(rows: list[dict[str, Any]], k: str) -> dict[str, Any] | None:
             vals = [r for r in rows if r.get(k)]
             if not vals:
                 return None
-            pick = max if k == "20min_mps" else min
+            pick = max if k in HIGHER_IS_BETTER else min
             r = pick(vals, key=lambda x: x[k])
             return {"value": r[k], "date": r["date"], "activity_id": r["activity_id"]}
 
@@ -211,7 +232,7 @@ def best_efforts(days: int = 730) -> dict[str, Any]:
                 v = r.get(k)
                 if v is None:
                     continue
-                better = cur.get(k) is None or (v > cur[k] if k == "20min_mps" else v < cur[k])
+                better = cur.get(k) is None or (v > cur[k] if k in HIGHER_IS_BETTER else v < cur[k])
                 if better:
                     cur[k] = v
         return {

@@ -38,3 +38,14 @@ def best_time_for_distance(t_s: np.ndarray, dist_m: np.ndarray, target_m: float)
         if dt > 0 and target_m / dt <= SPEED_MAX_VALID and (best is None or dt < best):
             best = dt
     return best
+
+
+def vdot(distance_m: float, time_s: float) -> float | None:
+    """VO2 máx estimado (VDOT de Daniels-Gilbert) a partir de una marca."""
+    t = time_s / 60
+    if distance_m <= 0 or t < 3.5:
+        return None
+    v = distance_m / t
+    vo2 = -4.60 + 0.182258 * v + 0.000104 * v * v
+    pct = 0.8 + 0.1894393 * np.exp(-0.012778 * t) + 0.2989558 * np.exp(-0.1932605 * t)
+    return float(round(vo2 / pct, 1))

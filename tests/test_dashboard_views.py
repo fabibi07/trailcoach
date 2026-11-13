@@ -130,3 +130,11 @@ def test_decoupling_pct():
     hr = np.where(t < 1800, 140.0, 154.0)
     assert decoupling_pct(t, v, hr) == round((1 - 140 / 154) * 100, 1)
     assert decoupling_pct(t[:600], v[:600], hr[:600]) is None
+
+
+def test_vdot_matches_daniels_table():
+    from trailcoach.training.best_efforts import vdot
+
+    assert abs(vdot(5000, 19 * 60 + 57) - 50) < 0.3
+    assert abs(vdot(10000, 41 * 60 + 21) - 50) < 0.3
+    assert vdot(1000, 180) is None
