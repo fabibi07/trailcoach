@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 import numpy as np
 import polars as pl
@@ -12,11 +13,18 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from trailcoach.core.config import settings
-from trailcoach.db.models import Activity, ActivityStreamSet, Athlete, RaceGoal
+from trailcoach.db.models import (
+    Activity,
+    ActivityLoad,
+    ActivityStreamSet,
+    ActivityZoneTime,
+    Athlete,
+    RaceGoal,
+)
 from trailcoach.db.session import get_db
 from trailcoach.training.best_efforts import DISTANCES_M, best_time_for_distance
 from trailcoach.training.engine import activity_day_py
-from trailcoach.training.intensity import weekly_distribution, zone_seconds
+from trailcoach.training.intensity import decoupling_pct, weekly_distribution, zone_seconds
 from trailcoach.training.race_plan import build_plan
 from trailcoach.training.recovery import recovery_insights, wellness_series
 from trailcoach.training.threshold_estimation import best_mean, guard_speed
@@ -84,6 +92,62 @@ def recovery(days: int = 90) -> dict[str, Any]:
             "series": series,
             "insights": [i.__dict__ for i in recovery_insights(series, today)],
         }
+
+
+@router.get("/v1/activities/{activity_id}/metrics")
+def activity_metrics(activity_id: UUID) -> dict[str, Any]:
+    """Métricas calculadas de una actividad: cargas, zonas, ritmo y desacople."""
+    with get_db() as db:
+        a = db.get(Activity, activity_id)
+        if a is None:
+            raise HTTPException(404, "Activity not found")
+        loads = [
+            {"method": lo.method, "value": round(float(lo.value), 1), "primary": lo.is_primary}
+            for lo in db.query(ActivityLoad).filter(ActivityLoad.activity_id == activity_id)
+        ]
+        dist_km = float(a.distance_m) / 1000 if a.distance_m else None
+        moving_s = float(a.duration_moving_s or a.duration_elapsed_s or 0) or None
+        out: dict[str, Any] = {
+            "loads": sorted(loads, key=lambda x: (not x["primary"], x["method"])),
+            "pace_min_km": moving_s / 60 / dist_km if moving_s and dist_km else None,
+            "zones_lthr": None,
+            "lthr": None,
+            "decoupling_pct": None,
+            "device_hr_zones": [],
+        }
+        zt = (
+            db.query(ActivityZoneTime)
+            .filter(
+                ActivityZoneTime.activity_id == activity_id,
+                ActivityZoneTime.zone_kind == "heart_rate",
+            )
+            .order_by(ActivityZoneTime.source, ActivityZoneTime.zone_index)
+            .all()
+        )
+        if zt:
+            src = zt[0].source
+            out["device_hr_zones"] = [
+                {
+                    "zone": z.zone_index,
+                    "minutes": round(float(z.seconds) / 60, 1),
+                    "upper_bpm": float(z.upper_bound) if z.upper_bound is not None else None,
+                }
+                for z in zt
+                if z.source == src
+            ]
+        ss = (
+            db.query(ActivityStreamSet).filter(ActivityStreamSet.activity_id == activity_id).first()
+        )
+        st = _streams(ss, ("t_s", "hr_bpm", "speed_mps")) if ss else None
+        if st and "hr_bpm" in st:
+            lthr = get_thresholds(db, a.athlete_id, activity_day_py(a)).get("lthr_bpm")
+            if lthr is not None:
+                out["lthr"] = float(lthr.value)
+                z = zone_seconds(st["t_s"], st["hr_bpm"], float(lthr.value))
+                out["zones_lthr"] = {k: round(v / 60, 1) for k, v in z.items()}
+            if "speed_mps" in st:
+                out["decoupling_pct"] = decoupling_pct(st["t_s"], st["speed_mps"], st["hr_bpm"])
+        return out
 
 
 @router.get("/v1/weekly-intensity")

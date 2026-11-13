@@ -52,3 +52,19 @@ def weekly_distribution(per_activity: list[tuple[date, dict[str, float]]]) -> li
             }
         )
     return out
+
+
+def decoupling_pct(t_s: np.ndarray, speed_mps: np.ndarray, hr: np.ndarray) -> float | None:
+    """Desacople aeróbico: caída % de velocidad/pulso entre la 1.ª y la 2.ª mitad.
+
+    Solo usa muestras en movimiento (>0,5 m/s) y FC válida; requiere >= 20 min.
+    """
+    ok = (speed_mps > 0.5) & (hr >= 30) & (hr <= 220)
+    if ok.sum() < 2 or t_s[ok][-1] - t_s[ok][0] < 1200:
+        return None
+    t, v, h = t_s[ok], speed_mps[ok], hr[ok]
+    mid = t[0] + (t[-1] - t[0]) / 2
+    first, second = t < mid, t >= mid
+    ef1 = v[first].mean() / h[first].mean()
+    ef2 = v[second].mean() / h[second].mean()
+    return float(round((ef1 - ef2) / ef1 * 100, 1))

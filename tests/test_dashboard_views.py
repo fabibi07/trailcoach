@@ -118,3 +118,15 @@ def test_coach_usage_cost_and_monthly(tmp_path):
     assert m["questions"] == 2
     assert m["input_tokens"] == 1900 and m["output_tokens"] == 500
     assert m["cost_usd"] == 0.0132
+
+
+def test_decoupling_pct():
+    import numpy as np
+
+    from trailcoach.training.intensity import decoupling_pct
+
+    t = np.arange(0, 3600, 1.0)
+    v = np.full_like(t, 3.0)
+    hr = np.where(t < 1800, 140.0, 154.0)
+    assert decoupling_pct(t, v, hr) == round((1 - 140 / 154) * 100, 1)
+    assert decoupling_pct(t[:600], v[:600], hr[:600]) is None

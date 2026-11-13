@@ -10,7 +10,17 @@
     body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin:0; padding:1rem; background:var(--bg); color:var(--text); }
     h1 { margin:0 0 .5rem; font-size:1.25rem; }
     .muted { color:var(--muted); font-size:.85rem; }
-    .tabs { display:flex; gap:.5rem; margin-bottom:1rem; }
+    .tabs { display:flex; gap:.5rem; margin-bottom:1rem; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    .tab { white-space:nowrap; flex:0 0 auto; }
+    .zbar { display:flex; height:1.4rem; border-radius:.4rem; overflow:hidden; margin:.3rem 0; }
+    .zbar div { display:flex; align-items:center; justify-content:center; font-size:.7rem; color:#0f172a; font-weight:600; }
+    @media (max-width:600px) {
+      body { padding:.5rem; }
+      .grid { grid-template-columns:1fr; }
+      .cards { grid-template-columns: repeat(2, 1fr); }
+      .card .value { font-size:1.2rem; }
+      #activity .panel:first-child { max-height:40vh !important; }
+    }
     .tab { background:var(--panel); color:var(--text); border:none; padding:.5rem 1rem; border-radius:.5rem; cursor:pointer; }
     .tab.active { background:var(--accent); }
     .tab-content { display:none; }
@@ -206,7 +216,8 @@
           <div id="detail-content">Selecciona una actividad.</div>
         </div>
         <div class="panel">
-          <h2>Canales</h2>
+          <h2>Gráficos de la sesión</h2>
+          <p class="help">Marca qué variables ver. Los gráficos están sincronizados: al pasar el dedo o el mouse por uno, se marca el mismo momento en todos. Sirve para ver, por ejemplo, cómo sube el pulso en cada subida.</p>
           <div class="selectors" id="channel-selectors"></div>
           <div id="profile-charts"></div>
         </div>
@@ -587,8 +598,8 @@
         const el = document.createElement('div');
         el.className = 'activity';
         el.dataset.id = a.id;
-        el.innerHTML = `<div><strong>${fmtDate(a.start_time_utc)}</strong> — ${a.sport}</div>
-          <div class="muted">${a.distance_km} km · ${a.duration_min} min · ${a.ascent_m} m D+ · ${a.data_quality}</div>`;
+        el.innerHTML = `<div><strong>${fmtDate(a.start_time_utc)}</strong> — ${sportEs(a.sport)}</div>
+          <div class="muted">${fmt(a.distance_km, 1)} km · ${fmt(a.duration_min, 0)} min · ${fmtInt(a.ascent_m)} m D+</div>`;
         el.addEventListener('click', () => selectActivity(a.id, el));
         container.appendChild(el);
       });
@@ -600,27 +611,82 @@
       if (el) el.classList.add('active');
       currentActivityId = id;
 
-      const [detail, series] = await Promise.all([
+      const [detail, series, m] = await Promise.all([
         fetch(`/v1/activities/${id}`).then(r => r.json()),
+        fetch(`/v1/activities/${id}/metrics`).then(r => r.json()),
         fetch(`/v1/activities/${id}/timeseries?max_points=2000`).then(r => r.json())
       ]);
 
-      document.getElementById('detail-content').innerHTML = `
-        <div class="cards" style="margin-bottom:.5rem">
-          <div class="card"><div class="value">${fmt(detail.distance_km, 2)}</div><div class="label">Distancia (km)</div></div>
-          <div class="card"><div class="value">${fmt(detail.duration_min, 0)}</div><div class="label">Tiempo (min)</div></div>
-          <div class="card"><div class="value">${fmtInt(detail.ascent_m)} / ${fmtInt(detail.descent_m)}</div><div class="label">D+ / D- (m)</div></div>
-          <div class="card"><div class="value">${detail.avg_hr || '-'}</div><div class="label">HR media / máx<br>${detail.max_hr || '-'}</div></div>
-          <div class="card"><div class="value">${detail.avg_cadence || '-'}</div><div class="label">Cadencia media</div></div>
-          <div class="card"><div class="value">${detail.avg_power || '-'}</div><div class="label">Potencia media (W)</div></div>
-        </div>
-        <div class="muted">Calidad: ${detail.data_quality}${detail.quality_flags?.length ? ' · Flags: ' + detail.quality_flags.join(', ') : ''}</div>
-        ${detail.intervals?.length ? `<h3 style="margin:1rem 0 .3rem">Vueltas</h3><div class="laps-wrap"><table><thead><tr><th>Tipo</th><th>Dist</th><th>Tiempo</th><th>D+</th><th>HR</th><th>Vel</th></tr></thead><tbody>${detail.intervals.map(i => `<tr><td>${i.kind} ${i.seq}</td><td>${i.distance_km} km</td><td>${i.duration_min} min</td><td>${fmtInt(i.ascent_m)} m</td><td>${i.avg_hr || '-'}</td><td>${i.avg_speed_kmh || '-'}</td></tr>`).join('')}</tbody></table></div>` : ''}
-      `;
+      document.getElementById('detail-content').innerHTML = renderActivityDetail(detail, m);
 
       activityTimeseries = series;
       renderChannelSelector(series.available);
       renderProfile();
+    }
+
+    const SPORT_ES = { running:'Carrera', trail_running:'Trail', walking:'Caminata', hiking:'Excursionismo',
+      cycling:'Ciclismo', training:'Fuerza / gimnasio', strength_training:'Fuerza', swimming:'Natación', generic:'Otro' };
+    function sportEs(s) { return SPORT_ES[s] || (s || '-').replace(/_/g, ' '); }
+    const QUALITY_ES = { authoritative:'Completa (FIT del reloj)', summary_only:'Solo resumen', degraded:'Parcial' };
+    const LOAD_HELP = {
+      rTSS: 'carga por ritmo (ruta/pista): 100 = 1 h a tu ritmo umbral',
+      HRSS: 'carga por pulso: 100 = 1 h a tu FC umbral (LTHR)',
+      TRIMP: 'impulso de entrenamiento por pulso (escala propia, más alto = más duro)',
+      TSS_power: 'carga por potencia del reloj: 100 = 1 h a tu potencia umbral'
+    };
+    function chMean(detail, ch) { const c = (detail.streams?.channels || []).find(x => x.channel === ch); return c ? c.mean : null; }
+    function loadLabel(v) { return v < 50 ? 'suave' : v < 100 ? 'moderada' : v < 200 ? 'dura' : 'muy dura'; }
+    function renderActivityDetail(detail, m) {
+      const primary = (m.loads || []).find(l => l.primary);
+      const card = (v, l) => `<div class="card"><div class="value">${v}</div><div class="label">${l}</div></div>`;
+      const z = m.zones_lthr;
+      let zonesHtml = '<p class="muted">Sin pulso o sin FC umbral para esta fecha.</p>';
+      if (z) {
+        const tot = (z.low + z.mid + z.high) || 1, pct = v => Math.round(v / tot * 100);
+        zonesHtml = `<div class="zbar">
+          <div style="width:${pct(z.low)}%;background:#22c55e">${pct(z.low) > 8 ? pct(z.low) + '%' : ''}</div>
+          <div style="width:${pct(z.mid)}%;background:#f59e0b">${pct(z.mid) > 8 ? pct(z.mid) + '%' : ''}</div>
+          <div style="width:${pct(z.high)}%;background:#ef4444">${pct(z.high) > 8 ? pct(z.high) + '%' : ''}</div></div>
+          <div class="muted">Suave ${fmt(z.low, 0)} min · Medio ${fmt(z.mid, 0)} min · Fuerte ${fmt(z.high, 0)} min (LTHR ${fmtInt(m.lthr)} ppm)</div>`;
+      }
+      const dz = (m.device_hr_zones || []).filter(x => x.zone >= 1 && x.upper_bpm != null);
+      const dzHtml = dz.length ? `<details style="margin-top:.4rem"><summary class="muted">Zonas 1-5 del reloj</summary><table><thead><tr><th>Zona</th><th>Hasta (ppm)</th><th>Minutos</th></tr></thead><tbody>${dz.map(x => `<tr><td>Z${x.zone}</td><td>${fmtInt(x.upper_bpm)}</td><td>${fmt(x.minutes, 1)}</td></tr>`).join('')}</tbody></table></details>` : '';
+      const dyn = [
+        ['stance_time_ms', 'Contacto con el suelo', 'ms', 0, 'menos = pisada más reactiva (≈ 220-300 ms es habitual)'],
+        ['vertical_oscillation_mm', 'Oscilación vertical', 'mm', 0, 'cuánto rebotas; menos = más eficiente (≈ 60-100 mm)'],
+        ['vertical_ratio_pct', 'Relación vertical', '%', 1, 'rebote / largo de zancada; menos es mejor (< 8 % es bueno)'],
+        ['step_length_mm', 'Largo de paso', 'm', 2, 'depende del ritmo y del terreno'],
+        ['temp_c', 'Temperatura', '°C', 0, 'el calor sube el pulso a igual ritmo'],
+      ].map(([ch, l, u, d, h]) => { let v = chMean(detail, ch); if (v == null) return ''; if (ch === 'step_length_mm') v = v / 1000;
+        return `<tr><td>${l}</td><td>${fmt(v, d)} ${u}</td><td class="muted">${h}</td></tr>`; }).join('');
+      const dec = m.decoupling_pct;
+      const decTxt = dec == null ? 'Necesita ≥ 20 min con pulso y GPS.' :
+        dec < 5 ? 'Bajo 5 %: buena base aeróbica, el pulso se mantuvo estable.' :
+        dec < 10 ? 'Entre 5 y 10 %: algo de fatiga, calor o deshidratación al final.' :
+        'Sobre 10 %: el pulso subió mucho para el mismo ritmo (fatiga, calor, poca base o sesión con cambios de intensidad/desnivel).';
+      return `
+        <div class="muted" style="margin-bottom:.5rem">${sportEs(detail.sport)} · ${fmtDate(detail.start_time_utc)} · Datos: ${QUALITY_ES[detail.data_quality] || detail.data_quality}</div>
+        <div class="cards" style="margin-bottom:.5rem">
+          ${card(fmt(detail.distance_km, 2), 'Distancia (km)')}
+          ${card(fmt(detail.duration_min, 0), 'Tiempo (min)')}
+          ${card(fmtPace(m.pace_min_km), 'Ritmo medio (min/km)')}
+          ${card(`${fmtInt(detail.ascent_m)} / ${fmtInt(detail.descent_m)}`, 'D+ / D- (m)')}
+          ${card(`${fmtInt(detail.avg_hr)} / ${fmtInt(detail.max_hr)}`, 'Pulso medio / máx (ppm)')}
+          ${card(primary ? fmt(primary.value, 0) : '-', `Carga ${primary ? primary.method + ' · ' + loadLabel(primary.value) : ''}`)}
+          ${card(fmtInt(detail.avg_cadence), 'Cadencia (pasos/min)')}
+          ${card(fmtInt(detail.avg_power), 'Potencia media (W)')}
+        </div>
+        <p class="help"><b>Ritmo medio</b>: tiempo en movimiento / distancia; en trail depende mucho del desnivel. <b>Cadencia</b>: pasos por minuto, en carrera suele estar entre 160 y 180. <b>Carga</b>: cuánto estrés generó la sesión (&lt;50 suave, 50-100 moderada, 100-200 dura, &gt;200 muy dura).</p>
+        <h3 style="margin:1rem 0 .3rem">Cargas calculadas</h3>
+        <table><tbody>${(m.loads || []).map(l => `<tr><td>${l.method}${l.primary ? ' <b>(principal)</b>' : ''}</td><td>${fmt(l.value, 0)}</td><td class="muted">${LOAD_HELP[l.method] || ''}</td></tr>`).join('') || '<tr><td class="muted">Sin carga calculada</td></tr>'}</tbody></table>
+        <p class="help">La <b>principal</b> es la que suma a tu fitness y fatiga: rTSS en ruta y pista; HRSS en trail y otros deportes.</p>
+        <h3 style="margin:1rem 0 .3rem">Intensidad de la sesión</h3>
+        ${zonesHtml}${dzHtml}
+        <p class="help"><b>Verde</b>: suave (&lt;90 % LTHR). <b>Amarillo</b>: medio/tempo. <b>Rojo</b>: sobre el umbral. Un rodaje debería ser casi todo verde.</p>
+        <h3 style="margin:1rem 0 .3rem">Desacople aeróbico: ${dec == null ? '-' : fmt(dec, 1) + ' %'}</h3>
+        <p class="help">Compara ritmo/pulso de la 1.ª y la 2.ª mitad. ${decTxt}</p>
+        ${dyn ? `<h3 style="margin:1rem 0 .3rem">Técnica de carrera (promedios)</h3><table><tbody>${dyn}</tbody></table>` : ''}
+        ${detail.intervals?.length ? `<h3 style="margin:1rem 0 .3rem">Vueltas</h3><div class="laps-wrap"><table><thead><tr><th>#</th><th>Dist</th><th>Tiempo</th><th>Ritmo</th><th>D+</th><th>Pulso</th></tr></thead><tbody>${detail.intervals.map(i => `<tr><td>${i.seq}</td><td>${fmt(i.distance_km, 2)} km</td><td>${fmt(i.duration_min, 1)} min</td><td>${i.avg_speed_kmh ? fmtPace(60 / i.avg_speed_kmh) : '-'}</td><td>${fmtInt(i.ascent_m)} m</td><td>${fmtInt(i.avg_hr)}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
     }
 
     function renderChannelSelector(available) {
