@@ -189,6 +189,7 @@
         <textarea id="coach-q" rows="3" style="width:100%" placeholder="Ej: ¿Cómo debería entrenar esta semana?"></textarea>
         <div style="margin-top:.5rem"><button class="primary" onclick="askCoach()">Preguntar</button></div>
         <div id="coach-a" class="answer"></div>
+        <p id="coach-usage" class="help" style="margin-top:.75rem"></p>
       </div>
     </div>
   </div>
@@ -562,7 +563,16 @@
       out.textContent = 'Pensando...';
       const r = await fetch('/v1/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: q }) }).then(r => r.json());
       out.textContent = r.answer || r.error || 'Sin respuesta.';
+      renderUsage(r.usage, r.month);
     }
+    function renderUsage(u, m) {
+      const usd = v => v == null ? '-' : 'US$' + Number(v).toFixed(4);
+      const parts = [];
+      if (u) parts.push(`Esta respuesta: ${u.input_tokens} tokens enviados + ${u.output_tokens} recibidos ≈ ${usd(u.cost_usd)}.`);
+      if (m) parts.push(`Este mes: ${m.questions} preguntas, ${m.input_tokens + m.output_tokens} tokens ≈ ${usd(m.cost_usd)} (estimado; el cobro real está en console.anthropic.com → Usage).`);
+      document.getElementById('coach-usage').textContent = parts.join(' ');
+    }
+    fetch('/v1/ask/usage').then(r => r.json()).then(m => renderUsage(null, m)).catch(() => {});
 
     // --- Activity tab ---
     let activityTimeseries = null;

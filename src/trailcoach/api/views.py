@@ -249,6 +249,14 @@ class AskIn(BaseModel):
     question: str = Field(min_length=2, max_length=2000)
 
 
+@router.get("/v1/ask/usage")
+def ask_usage() -> dict[str, Any]:
+    """Consumo de tokens del Coach IA en el mes actual (registro local)."""
+    from trailcoach.ai.coach import monthly_usage
+
+    return monthly_usage()
+
+
 @router.post("/v1/ask")
 def ask_coach(body: AskIn) -> dict[str, Any]:
     from trailcoach.ai.coach import ask

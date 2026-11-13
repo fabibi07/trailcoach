@@ -88,3 +88,33 @@ def test_race_plan_phases():
     assert plan["days_left"] == 60 and plan["taper_start"] == "2026-12-29"
     assert plan["estimated_time_h"] == 9.6
     assert all(c["ok"] for c in plan["checks"])
+
+
+def test_coach_usage_cost_and_monthly(tmp_path):
+    import json
+
+    from trailcoach.ai.coach import cost_usd, monthly_usage
+
+    assert cost_usd("claude-sonnet-4-5", 1000, 500) == (1000 * 3 + 500 * 15) / 1e6
+    assert cost_usd("desconocido", 1, 1) is None
+    log = tmp_path / "u.jsonl"
+    rows = [
+        {
+            "ts": "2026-11-01T10:00:00",
+            "input_tokens": 1000,
+            "output_tokens": 200,
+            "cost_usd": 0.006,
+        },
+        {
+            "ts": "2026-11-02T10:00:00",
+            "input_tokens": 900,
+            "output_tokens": 300,
+            "cost_usd": 0.0072,
+        },
+        {"ts": "2026-10-30T10:00:00", "input_tokens": 5, "output_tokens": 5, "cost_usd": 1.0},
+    ]
+    log.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    m = monthly_usage(log, "2026-11")
+    assert m["questions"] == 2
+    assert m["input_tokens"] == 1900 and m["output_tokens"] == 500
+    assert m["cost_usd"] == 0.0132
