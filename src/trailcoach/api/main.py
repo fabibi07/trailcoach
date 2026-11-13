@@ -1,6 +1,7 @@
 """FastAPI application."""
 
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
@@ -11,6 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func
 
+from trailcoach.api.views import router as views_router
 from trailcoach.db.models import (
     Activity,
     ActivityInterval,
@@ -24,7 +26,8 @@ from trailcoach.db.models import (
 )
 from trailcoach.db.session import SessionLocal, get_db
 from trailcoach.training.engine import activity_day
-from trailcoach.training.insights import build_insights
+from trailcoach.training.insights import build_insights, sort_insights
+from trailcoach.training.recovery import recovery_insights, wellness_series
 from trailcoach.training.thresholds import get_thresholds
 
 
@@ -34,6 +37,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="TrailCoach", version="0.1.0", lifespan=lifespan)
+app.include_router(views_router)
 
 FRONTEND_DIR = Path(__file__).parent.parent.parent.parent / "frontend"
 if FRONTEND_DIR.exists():
@@ -106,9 +110,7 @@ def get_activity(activity_id: UUID):
     if not a:
         raise HTTPException(404, "Activity not found")
     sources = (
-        db.query(SourceActivity)
-        .filter(SourceActivity.canonical_activity_id == activity_id)
-        .all()
+        db.query(SourceActivity).filter(SourceActivity.canonical_activity_id == activity_id).all()
     )
     intervals = (
         db.query(ActivityInterval)
@@ -117,9 +119,7 @@ def get_activity(activity_id: UUID):
         .all()
     )
     stream_set = (
-        db.query(ActivityStreamSet)
-        .filter(ActivityStreamSet.activity_id == activity_id)
-        .first()
+        db.query(ActivityStreamSet).filter(ActivityStreamSet.activity_id == activity_id).first()
     )
     channels = []
     if stream_set:
@@ -171,6 +171,7 @@ def get_activity(activity_id: UUID):
 
 def _pace_min_km(s: pl.Series) -> pl.Series:
     """Convert speed (m/s) to pace (min/km), capping very slow/stopped samples."""
+
     def _to_pace(v: float | None) -> float | None:
         if v is None or v <= 0:
             return None
@@ -192,9 +193,7 @@ def get_timeseries(
 
     db = next(_get_db())
     stream_set = (
-        db.query(ActivityStreamSet)
-        .filter(ActivityStreamSet.activity_id == activity_id)
-        .first()
+        db.query(ActivityStreamSet).filter(ActivityStreamSet.activity_id == activity_id).first()
     )
     if not stream_set:
         raise HTTPException(404, "No stream data")
@@ -208,9 +207,7 @@ def get_timeseries(
     if "speed_mps" in df.columns:
         gap = [
             grade_adjusted_speed(s, g)
-            for s, g in zip(
-                df["speed_mps"].to_list(), df["grade_pct"].to_list(), strict=False
-            )
+            for s, g in zip(df["speed_mps"].to_list(), df["grade_pct"].to_list(), strict=False)
         ]
         df = df.with_columns(
             pl.Series("gap_mps", gap, dtype=pl.Float64),
@@ -327,106 +324,110 @@ def athlete_state():
         athlete = db.query(Athlete).first()
         if athlete is None:
             raise HTTPException(404, "No athlete configured")
+        return athlete_state_data(db, athlete)
 
-        today = date.today()
-        week_start = today - timedelta(days=7)
-        month_start = today - timedelta(days=28)
 
-        pmc = (
-            db.query(TrainingMetricDaily)
-            .filter(
-                TrainingMetricDaily.athlete_id == athlete.id,
-                TrainingMetricDaily.date <= today,
-            )
-            .order_by(TrainingMetricDaily.date.desc())
-            .first()
+def athlete_state_data(db, athlete: Athlete) -> dict:
+    """Estado del atleta calculado (base del dashboard y del Coach IA)."""
+    today = date.today()
+    week_start = today - timedelta(days=7)
+    month_start = today - timedelta(days=28)
+
+    pmc = (
+        db.query(TrainingMetricDaily)
+        .filter(
+            TrainingMetricDaily.athlete_id == athlete.id,
+            TrainingMetricDaily.date <= today,
         )
+        .order_by(TrainingMetricDaily.date.desc())
+        .first()
+    )
 
-        def _aggregate(start: date):
-            rows = (
-                db.query(DailyLoad)
-                .filter(
-                    DailyLoad.athlete_id == athlete.id,
-                    DailyLoad.date >= start,
-                    DailyLoad.date <= today,
-                )
-                .all()
-            )
-            return {
-                "load": round(sum(float(r.load_primary or 0) for r in rows), 2),
-                "duration_h": round(sum(float(r.duration_s or 0) for r in rows) / 3600, 2),
-                "distance_km": round(sum(float(r.distance_m or 0) for r in rows) / 1000, 2),
-                "ascent_m": round(sum(float(r.ascent_m or 0) for r in rows), 2),
-                "n_activities": sum(r.n_activities for r in rows),
-            }
-
-        thresholds = get_thresholds(db, athlete.id, today)
-        last_7d = _aggregate(week_start)
-        last_28d = _aggregate(month_start)
-
-        best_pace = (
-            db.query(func.max(AthleteThreshold.value))
-            .filter(
-                AthleteThreshold.athlete_id == athlete.id,
-                AthleteThreshold.kind == "ftp_pace_mps",
-                AthleteThreshold.valid_from >= today - timedelta(days=365),
-                AthleteThreshold.valid_from <= today,
-            )
-            .scalar()
-        )
-        last_activity = (
-            db.query(func.max(DailyLoad.date))
+    def _aggregate(start: date):
+        rows = (
+            db.query(DailyLoad)
             .filter(
                 DailyLoad.athlete_id == athlete.id,
-                DailyLoad.n_activities > 0,
+                DailyLoad.date >= start,
                 DailyLoad.date <= today,
             )
-            .scalar()
+            .all()
         )
-        pace = thresholds.get("ftp_pace_mps")
-        insights = build_insights(
-            today=today,
-            tsb=float(pmc.tsb) if pmc and pmc.tsb is not None else None,
-            ramp_rate_7d=(
-                float(pmc.ramp_rate_7d) if pmc and pmc.ramp_rate_7d is not None else None
-            ),
-            load_7d=last_7d["load"],
-            load_28d=last_28d["load"],
-            ftp_pace_mps=float(pace.value) if pace else None,
-            ftp_pace_best_365d_mps=float(best_pace) if best_pace is not None else None,
-            ftp_pace_source=pace.source if pace else None,
-            last_activity=last_activity,
-        )
-
         return {
-            "as_of": today.isoformat(),
-            "athlete": {
-                "id": str(athlete.id),
-                "display_name": athlete.display_name,
-                "sex": athlete.sex,
-            },
-            "fitness": {"ctl": pmc.ctl, "label": "fitness"} if pmc else None,
-            "fatigue": {"atl": pmc.atl, "label": "fatigue"} if pmc else None,
-            "form": {
-                "tsb": pmc.tsb,
-                "label": _tsb_label(pmc.tsb),
-            }
-            if pmc
-            else None,
-            "ramp_rate_7d": pmc.ramp_rate_7d if pmc else None,
-            "last_7d": last_7d,
-            "last_28d": last_28d,
-            "insights": insights,
-            "thresholds_active": {
-                kind: {
-                    "value": float(t.value),
-                    "unit": t.unit,
-                    "valid_from": t.valid_from.isoformat(),
-                    "source": t.source,
-                }
-                for kind, t in thresholds.items()
-            },
+            "load": round(sum(float(r.load_primary or 0) for r in rows), 2),
+            "duration_h": round(sum(float(r.duration_s or 0) for r in rows) / 3600, 2),
+            "distance_km": round(sum(float(r.distance_m or 0) for r in rows) / 1000, 2),
+            "ascent_m": round(sum(float(r.ascent_m or 0) for r in rows), 2),
+            "n_activities": sum(r.n_activities for r in rows),
         }
+
+    thresholds = get_thresholds(db, athlete.id, today)
+    last_7d = _aggregate(week_start)
+    last_28d = _aggregate(month_start)
+
+    best_pace = (
+        db.query(func.max(AthleteThreshold.value))
+        .filter(
+            AthleteThreshold.athlete_id == athlete.id,
+            AthleteThreshold.kind == "ftp_pace_mps",
+            AthleteThreshold.valid_from >= today - timedelta(days=365),
+            AthleteThreshold.valid_from <= today,
+        )
+        .scalar()
+    )
+    last_activity = (
+        db.query(func.max(DailyLoad.date))
+        .filter(
+            DailyLoad.athlete_id == athlete.id,
+            DailyLoad.n_activities > 0,
+            DailyLoad.date <= today,
+        )
+        .scalar()
+    )
+    pace = thresholds.get("ftp_pace_mps")
+    insights = build_insights(
+        today=today,
+        tsb=float(pmc.tsb) if pmc and pmc.tsb is not None else None,
+        ramp_rate_7d=(float(pmc.ramp_rate_7d) if pmc and pmc.ramp_rate_7d is not None else None),
+        load_7d=last_7d["load"],
+        load_28d=last_28d["load"],
+        ftp_pace_mps=float(pace.value) if pace else None,
+        ftp_pace_best_365d_mps=float(best_pace) if best_pace is not None else None,
+        ftp_pace_source=pace.source if pace else None,
+        last_activity=last_activity,
+    )
+    rec = recovery_insights(wellness_series(db, athlete.id, 31, today), today)
+    insights = sort_insights([*(asdict(i) for i in rec), *insights])
+
+    return {
+        "as_of": today.isoformat(),
+        "athlete": {
+            "id": str(athlete.id),
+            "display_name": athlete.display_name,
+            "sex": athlete.sex,
+        },
+        "fitness": {"ctl": pmc.ctl, "label": "fitness"} if pmc else None,
+        "fatigue": {"atl": pmc.atl, "label": "fatigue"} if pmc else None,
+        "form": {
+            "tsb": pmc.tsb,
+            "label": _tsb_label(pmc.tsb),
+        }
+        if pmc
+        else None,
+        "ramp_rate_7d": pmc.ramp_rate_7d if pmc else None,
+        "last_7d": last_7d,
+        "last_28d": last_28d,
+        "insights": insights,
+        "thresholds_active": {
+            kind: {
+                "value": float(t.value),
+                "unit": t.unit,
+                "valid_from": t.valid_from.isoformat(),
+                "source": t.source,
+            }
+            for kind, t in thresholds.items()
+        },
+    }
 
 
 @app.get("/v1/athlete-thresholds")

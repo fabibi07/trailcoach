@@ -51,13 +51,25 @@
     .insight.info { border-color:var(--accent); }
     .insight.warn { border-color:var(--warn); }
     .insight.alert { border-color:var(--danger); }
+    .form-row { display:flex; flex-wrap:wrap; gap:.5rem; align-items:end; margin-bottom:.75rem; }
+    .form-row label { display:flex; flex-direction:column; font-size:.8rem; color:var(--muted); gap:.2rem; }
+    input, textarea { background:#0f172a; color:var(--text); border:1px solid #334155; border-radius:.4rem; padding:.4rem .5rem; font:inherit; }
+    button.primary { background:var(--accent); color:white; border:none; border-radius:.4rem; padding:.45rem .9rem; cursor:pointer; }
+    .big { font-size:2rem; font-weight:700; }
+    .check.ok::before { content:'✔ '; color:var(--ok); }
+    .check.no::before { content:'✘ '; color:var(--warn); }
+    .answer { white-space:pre-wrap; line-height:1.45; margin-top:.75rem; }
   </style>
 </head>
 <body>
   <h1>TrailCoach <span class="muted">Fase 2 — Training Engine + UI</span></h1>
   <div class="tabs">
     <button class="tab active" data-tab="dashboard">Resumen</button>
+    <button class="tab" data-tab="recovery">Recuperación</button>
+    <button class="tab" data-tab="race">Carrera objetivo</button>
+    <button class="tab" data-tab="best">Mejores marcas</button>
     <button class="tab" data-tab="activity">Actividad</button>
+    <button class="tab" data-tab="coach">Coach IA</button>
   </div>
 
   <div id="dashboard" class="tab-content active">
@@ -91,8 +103,92 @@
       </div>
       <div class="panel">
         <h2>Evolución de umbrales</h2>
-        <p class="help"><b>Ritmo umbral</b> (FTPa, más arriba = más rápido): el ritmo que sostienes ~1 h. <b>LTHR</b>: tu pulso en ese esfuerzo. <b>HRmax / HRrest</b>: pulso máximo y de reposo; si el de reposo sube varios días, puede ser fatiga o enfermedad.</p>
-        <div id="thresholds" class="chart"></div>
+        <p class="help"><b>Arriba, ritmo umbral</b>: el ritmo que sostienes ~1 h (más arriba = más rápido). Cada escalón es un cambio mensual; la línea gris punteada es tu mejor valor. <b>Abajo, pulso</b>: <b>LTHR</b> (pulso a ritmo umbral), <b>FC máx</b> y <b>FC reposo</b>; si el de reposo sube, puede ser fatiga o enfermedad.</p>
+        <div id="thresholds" class="chart" style="height:180px"></div>
+        <div id="thresholds-hr" class="chart" style="height:200px"></div>
+      </div>
+      <div class="panel">
+        <h2>Intensidad semanal por pulso</h2>
+        <p class="help">Horas por semana en 3 zonas según tu FC umbral (LTHR). <b>Suave</b> (&lt;90 % LTHR): conversacional. <b>Medio</b> (90-100 %): "tempo", cansa sin dar tanto estímulo. <b>Fuerte</b> (&gt;LTHR): series. Referencia habitual: ~80 % suave y ~20 % medio+fuerte. Es una guía, no una regla.</p>
+        <div id="intensity" class="chart"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="recovery" class="tab-content">
+    <div class="grid grid-1">
+      <div class="panel">
+        <h2>Cómo te recuperas</h2>
+        <p class="help">Lectura de tu última noche comparada con tu normal. Si aparece amarillo, prioriza un día suave.</p>
+        <div id="recovery-insights" class="insights">Cargando...</div>
+        <div id="recovery-cards" class="cards" style="margin-top:.75rem"></div>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="panel">
+        <h2>HRV nocturna</h2>
+        <p class="help"><b>HRV</b>: variación entre latidos durante el sueño. Más alta = sistema nervioso más recuperado. La <b>banda gris</b> es tu rango normal; bajo la banda varios días seguidos = fatiga acumulada, estrés o enfermedad.</p>
+        <div id="hrv-chart" class="chart"></div>
+      </div>
+      <div class="panel">
+        <h2>FC en reposo</h2>
+        <p class="help">Pulso más bajo del día. Si sube 5 ppm o más sobre tu normal, tu cuerpo está bajo carga (entrenamiento, estrés, mal sueño o un resfrío).</p>
+        <div id="rhr-chart" class="chart"></div>
+      </div>
+      <div class="panel">
+        <h2>Sueño</h2>
+        <p class="help"><b>Barras</b>: horas dormidas (meta ≥7 h). <b>Línea</b>: puntaje de sueño del reloj (0-100, sobre 80 es bueno).</p>
+        <div id="sleep-chart" class="chart"></div>
+      </div>
+      <div class="panel">
+        <h2>Body Battery y estrés</h2>
+        <p class="help"><b>Body Battery</b>: energía estimada por el reloj (0-100). El máximo del día muestra cuánto recargaste al dormir; si no pasa de ~60, descansaste poco. <b>Estrés</b>: promedio diario (más bajo = mejor).</p>
+        <div id="bb-chart" class="chart"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="race" class="tab-content">
+    <div class="grid grid-1">
+      <div class="panel">
+        <h2>Carrera objetivo</h2>
+        <p class="help">Ingresa tu próxima carrera. El plan es orientativo: compara tus últimas 4 semanas con lo que pide la carrera y te dice en qué fase estás.</p>
+        <div class="form-row">
+          <label>Nombre<input id="race-name" placeholder="Ej: Trail 42K"></label>
+          <label>Fecha<input id="race-date" type="date"></label>
+          <label>Distancia (km)<input id="race-km" type="number" step="0.1" style="width:6rem"></label>
+          <label>D+ (m)<input id="race-asc" type="number" style="width:6rem"></label>
+          <label>Tiempo objetivo (h, opcional)<input id="race-time" type="number" step="0.1" style="width:6rem"></label>
+          <button class="primary" onclick="saveRace()">Guardar</button>
+        </div>
+        <div id="race-plan" class="muted">Sin carrera definida.</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="best" class="tab-content">
+    <div class="grid grid-1">
+      <div class="panel">
+        <h2>Mejores marcas (ruta y pista)</h2>
+        <p class="help">Tus mejores tiempos dentro de cualquier carrera de los últimos 2 años, calculados desde el GPS (se descartan saltos de GPS). <b>Últimos 90 días</b> muestra tu nivel actual. El trail no se incluye porque el desnivel hace que los tiempos no sean comparables.</p>
+        <div id="best-table">Cargando...</div>
+      </div>
+      <div class="panel">
+        <h2>Evolución mensual</h2>
+        <p class="help">Mejor ritmo de cada mes por distancia (más arriba = más rápido). Si la línea sube con los meses, estás mejorando.</p>
+        <div id="best-chart" class="chart"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="coach" class="tab-content">
+    <div class="grid grid-1">
+      <div class="panel">
+        <h2>Coach IA</h2>
+        <p class="help">Pregunta sobre tu estado. El coach solo recibe tus métricas calculadas (carga, recuperación, intensidad, umbrales y carrera objetivo), nunca tus archivos ni tu GPS. No reemplaza a un médico.</p>
+        <textarea id="coach-q" rows="3" style="width:100%" placeholder="Ej: ¿Cómo debería entrenar esta semana?"></textarea>
+        <div style="margin-top:.5rem"><button class="primary" onclick="askCoach()">Preguntar</button></div>
+        <div id="coach-a" class="answer"></div>
       </div>
     </div>
   </div>
@@ -321,50 +417,151 @@
       }, true);
     }
 
+    const axisStyle = { axisLine: { lineStyle: { color: '#94a3b8' } }, axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#334155' } } };
+    const charts = {};
+    function chartOf(id) { return charts[id] || (charts[id] = echarts.init(document.getElementById(id))); }
+
     async function renderThresholds() {
       const rows = await fetch('/v1/athlete-thresholds').then(r => r.json());
+      const today = new Date().toISOString().slice(0, 10);
+      const steps = kind => {
+        const pts = rows.filter(r => r.kind === kind).map(r => [r.valid_from, r.value]);
+        if (pts.length) pts.push([today, pts[pts.length - 1][1]]);
+        return pts;
+      };
+      const pace = steps('ftp_pace_mps').map(([d, v]) => [d, 16.6666667 / v]);
+      const bestPace = pace.length ? Math.min(...pace.map(p => p[1])) : null;
       if (!thresholdsChart) thresholdsChart = echarts.init(document.getElementById('thresholds'));
-      const allDates = Array.from(new Set(rows.map(r => r.valid_from))).sort();
-      const kindMap = {};
-      rows.forEach(r => {
-        if (!kindMap[r.kind]) kindMap[r.kind] = {};
-        kindMap[r.kind][r.valid_from] = r.value;
-      });
-      const paceKinds = ['ftp_pace_mps'];
-      const hrKinds = ['lthr_bpm', 'hr_max_bpm', 'resting_hr_bpm'];
-      const hrColors = { lthr_bpm: '#ef4444', hr_max_bpm: '#f97316', resting_hr_bpm: '#22c55e' };
-      const hrNames = { lthr_bpm: 'LTHR', hr_max_bpm: 'HRmax', resting_hr_bpm: 'HRrest' };
-      const paceSeries = paceKinds.map(kind => ({
-        name: 'FTPa (min/km)', type: 'line', yAxisIndex: 0,
-        data: allDates.map(d => { const v = kindMap[kind]?.[d]; return v == null ? null : 16.6666667 / v; }),
-        lineStyle: { color: '#f59e0b', width: 2 }, symbol: 'circle', symbolSize: 8
-      }));
-      const hrSeries = [];
-      hrKinds.forEach(kind => {
-        const data = allDates.map(d => kindMap[kind]?.[d] ?? null);
-        if (data.some(v => v != null)) hrSeries.push({
-          name: hrNames[kind] + ' (bpm)', type: 'line', yAxisIndex: 1,
-          data, lineStyle: { color: hrColors[kind], width: 2 }, symbol: 'circle', symbolSize: 6
-        });
-      });
       thresholdsChart.setOption({
-        backgroundColor: 'transparent',
-        tooltip: { trigger: 'axis', formatter: p => {
-          return p.map(s => {
-            const v = s.value;
-            if (v == null) return `${s.marker} ${s.seriesName}: -`;
-            return `${s.marker} ${s.seriesName}: ${s.seriesName.includes('min/km') ? fmtPace(v) : fmt(v,0)}`;
-          }).join('<br>');
-        }},
-        legend: { data: paceSeries.concat(hrSeries).map(s => s.name), textStyle: { color: '#cbd5e1' }, bottom: 0 },
-        grid: { left: 60, right: 60, top: 40, bottom: 70 },
-        xAxis: { type: 'category', data: allDates, axisLine: { lineStyle: { color: '#94a3b8' } }, axisLabel: { rotate: 30, color: '#94a3b8' } },
-        yAxis: [
-          { type: 'value', name: 'Ritmo (min/km)', axisLabel: { formatter: v => fmtPace(v) }, axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { lineStyle: { color: '#334155' } }, inverse: true },
-          { type: 'value', name: 'FC (bpm)', position: 'right', axisLine: { lineStyle: { color: '#94a3b8' } }, splitLine: { show: false } }
-        ],
-        series: [...paceSeries, ...hrSeries]
+        tooltip: { trigger: 'axis', formatter: p => `${p[0].value[0]}<br>Ritmo umbral: ${fmtPace(p[0].value[1])} min/km` },
+        grid: { left: 55, right: 20, top: 20, bottom: 25 },
+        xAxis: { type: 'time', ...axisStyle, splitLine: { show: false } },
+        yAxis: { type: 'value', inverse: true, scale: true, name: 'min/km', ...axisStyle, axisLabel: { color: '#94a3b8', formatter: v => fmtPace(v) } },
+        series: [{ name: 'Ritmo umbral', type: 'line', step: 'end', data: pace, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#f59e0b', width: 2 },
+          markLine: bestPace ? { silent: true, symbol: 'none', lineStyle: { color: '#94a3b8', type: 'dashed' }, label: { formatter: `mejor ${fmtPace(bestPace)}`, color: '#94a3b8' }, data: [{ yAxis: bestPace }] } : undefined }]
       }, true);
+      const hrDefs = [['lthr_bpm', 'LTHR', '#ef4444'], ['hr_max_bpm', 'FC máx', '#f97316'], ['resting_hr_bpm', 'FC reposo', '#22c55e']];
+      chartOf('thresholds-hr').setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { textStyle: { color: '#cbd5e1' }, top: 0 },
+        grid: { left: 55, right: 20, top: 30, bottom: 25 },
+        xAxis: { type: 'time', ...axisStyle, splitLine: { show: false } },
+        yAxis: { type: 'value', scale: true, name: 'ppm', ...axisStyle },
+        series: hrDefs.map(([k, n, c]) => ({ name: n, type: 'line', step: 'end', data: steps(k), showSymbol: false, lineStyle: { color: c, width: 2 }, itemStyle: { color: c } }))
+      }, true);
+    }
+
+    async function renderIntensity() {
+      const data = await fetch('/v1/weekly-intensity?weeks=16').then(r => r.json());
+      const zones = [['low', 'Suave', '#22c55e'], ['mid', 'Medio', '#f59e0b'], ['high', 'Fuerte', '#ef4444']];
+      chartOf('intensity').setOption({
+        tooltip: { trigger: 'axis', formatter: p => p[0].axisValue + '<br>' + p.map(s => { const d = data[s.dataIndex]; return `${s.marker} ${s.seriesName}: ${fmt(s.value, 1)} h (${fmt(d[zones[s.seriesIndex][0] + '_pct'], 0)} %)`; }).join('<br>') },
+        legend: { textStyle: { color: '#cbd5e1' }, top: 0 },
+        grid: { left: 45, right: 20, top: 30, bottom: 30 },
+        xAxis: { type: 'category', data: data.map(d => d.week), ...axisStyle, splitLine: { show: false } },
+        yAxis: { type: 'value', name: 'h', ...axisStyle },
+        series: zones.map(([k, n, c]) => ({ name: n, type: 'bar', stack: 'z', data: data.map(d => d[k + '_h']), itemStyle: { color: c } }))
+      }, true);
+    }
+
+    function renderInsightsInto(id, items, empty) {
+      const el = document.getElementById(id);
+      el.innerHTML = items.length ? items.map(i => `<div class="insight ${i.level}"><div class="t">${i.title}</div><div class="m">${i.message}</div></div>`).join('') : empty;
+    }
+
+    async function loadRecovery() {
+      const { series, insights } = await fetch('/v1/recovery?days=90').then(r => r.json());
+      renderInsightsInto('recovery-insights', insights, '<span class="muted">Sin avisos: tus datos de recuperación están en rango o no hay datos de los últimos 2 días.</span>');
+      const last = series[series.length - 1] || {};
+      const card = (t, v, sub) => `<div class="card"><div class="muted">${t}</div><div class="value">${v}</div><div class="muted">${sub}</div></div>`;
+      document.getElementById('recovery-cards').innerHTML = last.date ? [
+        card('HRV anoche', `${fmtInt(last.hrv_ms)} ms`, `normal ${fmtInt(last.hrv_baseline_low_ms)}-${fmtInt(last.hrv_baseline_high_ms)} ms`),
+        card('FC en reposo', `${fmtInt(last.resting_hr)} ppm`, fmtDate(last.date)),
+        card('Sueño', `${fmt(last.sleep_h, 1)} h`, `puntaje ${last.sleep_score ?? '-'}`),
+        card('Body Battery máx', fmtInt(last.body_battery_max), `mín ${fmtInt(last.body_battery_min)}`),
+      ].join('') : '';
+      const x = series.map(d => d.date);
+      const base = { tooltip: { trigger: 'axis' }, grid: { left: 45, right: 45, top: 30, bottom: 30 }, xAxis: { type: 'category', data: x, ...axisStyle, splitLine: { show: false } } };
+      chartOf('hrv-chart').setOption({ ...base, legend: { textStyle: { color: '#cbd5e1' }, top: 0 }, yAxis: { type: 'value', scale: true, name: 'ms', ...axisStyle },
+        series: [
+          { name: 'Rango bajo', type: 'line', stack: 'band', data: series.map(d => d.hrv_baseline_low_ms), lineStyle: { opacity: 0 }, showSymbol: false },
+          { name: 'Rango normal', type: 'line', stack: 'band', data: series.map(d => d.hrv_baseline_low_ms != null && d.hrv_baseline_high_ms != null ? d.hrv_baseline_high_ms - d.hrv_baseline_low_ms : null), lineStyle: { opacity: 0 }, areaStyle: { color: '#94a3b833' }, showSymbol: false, itemStyle: { color: '#94a3b8' } },
+          { name: 'HRV', type: 'line', data: series.map(d => d.hrv_ms), lineStyle: { color: '#3b82f6', width: 2 }, itemStyle: { color: '#3b82f6' }, showSymbol: false, connectNulls: true }
+        ] }, true);
+      chartOf('rhr-chart').setOption({ ...base, yAxis: { type: 'value', scale: true, name: 'ppm', ...axisStyle },
+        series: [{ name: 'FC reposo', type: 'line', data: series.map(d => d.resting_hr), lineStyle: { color: '#22c55e' }, itemStyle: { color: '#22c55e' }, showSymbol: false, connectNulls: true }] }, true);
+      chartOf('sleep-chart').setOption({ ...base, legend: { textStyle: { color: '#cbd5e1' }, top: 0 },
+        yAxis: [{ type: 'value', name: 'h', ...axisStyle }, { type: 'value', name: 'puntaje', max: 100, ...axisStyle, splitLine: { show: false } }],
+        series: [{ name: 'Horas', type: 'bar', data: series.map(d => d.sleep_h), itemStyle: { color: '#6366f1' },
+            markLine: { silent: true, symbol: 'none', lineStyle: { color: '#94a3b8', type: 'dashed' }, data: [{ yAxis: 7 }] } },
+          { name: 'Puntaje', type: 'line', yAxisIndex: 1, data: series.map(d => d.sleep_score), showSymbol: false, lineStyle: { color: '#f59e0b' }, itemStyle: { color: '#f59e0b' }, connectNulls: true }] }, true);
+      chartOf('bb-chart').setOption({ ...base, legend: { textStyle: { color: '#cbd5e1' }, top: 0 }, yAxis: { type: 'value', max: 100, ...axisStyle },
+        series: [{ name: 'Body Battery máx', type: 'line', data: series.map(d => d.body_battery_max), showSymbol: false, lineStyle: { color: '#22c55e' }, itemStyle: { color: '#22c55e' } },
+          { name: 'Body Battery mín', type: 'line', data: series.map(d => d.body_battery_min), showSymbol: false, lineStyle: { color: '#ef4444' }, itemStyle: { color: '#ef4444' } },
+          { name: 'Estrés', type: 'line', data: series.map(d => d.stress_avg), showSymbol: false, lineStyle: { color: '#94a3b8', type: 'dashed' }, itemStyle: { color: '#94a3b8' } }] }, true);
+    }
+
+    const phaseNames = { build: 'Construcción', peak: 'Bloque específico', taper: 'Taper (bajar carga)', race_week: 'Semana de carrera', done: 'Terminada' };
+    function renderRace(race) {
+      const el = document.getElementById('race-plan');
+      if (!race) { el.textContent = 'Sin carrera definida.'; return; }
+      const g = race.goal, p = race.plan;
+      document.getElementById('race-name').value = g.name;
+      document.getElementById('race-date').value = g.race_date;
+      document.getElementById('race-km').value = g.distance_km;
+      document.getElementById('race-asc').value = g.ascent_m ?? '';
+      document.getElementById('race-time').value = g.target_time_h ?? '';
+      const tsbOk = p.tsb != null && p.tsb >= 5 && p.tsb <= 25;
+      el.innerHTML = `
+        <div class="cards">
+          <div class="card"><div class="muted">Faltan</div><div class="big">${p.days_left} días</div><div class="muted">${fmt(p.weeks_left, 1)} semanas · ${fmtDate(g.race_date)}</div></div>
+          <div class="card"><div class="muted">Fase actual</div><div class="value">${phaseNames[p.phase] || p.phase}</div><div class="muted">taper desde ${fmtDate(p.taper_start)}</div></div>
+          <div class="card"><div class="muted">Fitness (CTL)</div><div class="value">${fmt(p.ctl, 0)}</div><div class="muted">forma hoy ${fmt(p.tsb, 0)} · meta el día de carrera +5 a +25</div></div>
+          <div class="card"><div class="muted">Tiempo estimado</div><div class="value">${fmt(p.estimated_time_h, 1)} h</div><div class="muted">${g.target_time_h ? 'tu objetivo' : 'aprox. por km y D+'}</div></div>
+        </div>
+        <div class="insight info" style="margin:.75rem 0"><div class="t">Qué hacer ahora</div><div class="m">${p.advice}</div></div>
+        <h3 style="margin:.5rem 0 .3rem">Tu preparación vs. lo que pide la carrera</h3>
+        <table><thead><tr><th>Indicador</th><th>Tú (4 sem.)</th><th>Referencia</th></tr></thead><tbody>
+        ${p.checks.map(c => `<tr><td class="check ${c.ok ? 'ok' : 'no'}">${c.label}</td><td>${c.current} ${c.unit}</td><td>${c.target} ${c.unit}</td></tr>`).join('')}
+        </tbody></table>
+        <p class="help" style="margin-top:.5rem">Referencias: tirada larga ≈ 65 % del tiempo de carrera (máx. 5 h); D+ semanal ≈ D+ de la carrera; km semanales ≈ 1,2 × distancia (máx. 100). ${tsbOk ? '' : ''}</p>`;
+    }
+    async function loadRace() { renderRace((await fetch('/v1/race-goal').then(r => r.json())).race); }
+    async function saveRace() {
+      const num = id => { const v = document.getElementById(id).value; return v === '' ? null : Number(v); };
+      const body = { name: document.getElementById('race-name').value || 'Carrera', race_date: document.getElementById('race-date').value,
+        distance_km: num('race-km'), ascent_m: num('race-asc'), target_time_h: num('race-time') };
+      const r = await fetch('/v1/race-goal', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) { document.getElementById('race-plan').textContent = 'Revisa los datos: fecha, distancia y D+ deben ser válidos.'; return; }
+      renderRace((await r.json()).race);
+    }
+
+    const bestDefs = [['1k', '1 km', 1], ['5k', '5 km', 5], ['10k', '10 km', 10], ['21k', 'Media maratón', 21.0975]];
+    async function loadBest() {
+      const d = await fetch('/v1/best-efforts').then(r => r.json());
+      const cell = (e, km) => e ? `${fmtDur(e.value)} <span class="muted">(${fmtPace(e.value / 60 / km)}/km · ${fmtDate(e.date)})</span>` : '-';
+      const p20 = e => e ? `${fmtPace(16.6666667 / e.value)}/km <span class="muted">(${fmtDate(e.date)})</span>` : '-';
+      document.getElementById('best-table').innerHTML = `<table><thead><tr><th>Marca</th><th>Mejor (2 años)</th><th>Últimos 90 días</th></tr></thead><tbody>
+        ${bestDefs.map(([k, n, km]) => `<tr><td>${n}</td><td>${cell(d.all_time[k], km)}</td><td>${cell(d.last_90d[k], km)}</td></tr>`).join('')}
+        <tr><td>Ritmo de 20 min</td><td>${p20(d.all_time['20min_mps'])}</td><td>${p20(d.last_90d['20min_mps'])}</td></tr></tbody></table>`;
+      const colors = ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6'];
+      chartOf('best-chart').setOption({
+        tooltip: { trigger: 'axis', formatter: p => p[0].axisValue + '<br>' + p.filter(s => s.value != null).map(s => `${s.marker} ${s.seriesName}: ${fmtPace(s.value)}/km`).join('<br>') },
+        legend: { textStyle: { color: '#cbd5e1' }, top: 0 },
+        grid: { left: 55, right: 20, top: 30, bottom: 30 },
+        xAxis: { type: 'category', data: d.monthly.map(m => m.month), ...axisStyle, splitLine: { show: false } },
+        yAxis: { type: 'value', inverse: true, scale: true, name: 'min/km', ...axisStyle, axisLabel: { color: '#94a3b8', formatter: v => fmtPace(v) } },
+        series: bestDefs.map(([k, n, km], i) => ({ name: n, type: 'line', connectNulls: true, data: d.monthly.map(m => m[k] ? m[k] / 60 / km : null), lineStyle: { color: colors[i] }, itemStyle: { color: colors[i] } }))
+      }, true);
+    }
+
+    async function askCoach() {
+      const q = document.getElementById('coach-q').value.trim();
+      const out = document.getElementById('coach-a');
+      if (q.length < 2) return;
+      out.textContent = 'Pensando...';
+      const r = await fetch('/v1/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: q }) }).then(r => r.json());
+      out.textContent = r.answer || r.error || 'Sin respuesta.';
     }
 
     // --- Activity tab ---
@@ -477,11 +674,15 @@
     }
 
     window.addEventListener('resize', () => {
-      [pmcChart, weeklyLoadChart, weeklyVolChart, thresholdsChart, ...profileCharts].forEach(c => c && c.resize());
+      [pmcChart, weeklyLoadChart, weeklyVolChart, thresholdsChart, ...Object.values(charts), ...profileCharts].forEach(c => c && c.resize());
     });
 
     loadDashboard();
     loadActivities();
+    renderIntensity();
+    loadRecovery();
+    loadRace();
+    loadBest();
   </script>
 </body>
 </html>

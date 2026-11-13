@@ -613,9 +613,7 @@ class Device(Base):
     name: Mapped[str | None] = mapped_column(String(120))
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    __table_args__ = (
-        UniqueConstraint("athlete_id", "serial_number", "manufacturer", "model"),
-    )
+    __table_args__ = (UniqueConstraint("athlete_id", "serial_number", "manufacturer", "model"),)
 
 
 class AthleteSourceAccount(Base):
@@ -669,3 +667,19 @@ class SourcePriority(Base):
     priority: Mapped[list[str]] = mapped_column(JSON, default=list)
 
     __table_args__ = (UniqueConstraint("athlete_id", "metric"),)
+
+
+class RaceGoal(Base):
+    """Carrera objetivo del atleta (una activa a la vez: la próxima por fecha)."""
+
+    __tablename__ = "race_goal"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    athlete_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("athlete.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    race_date: Mapped[date] = mapped_column(Date, nullable=False)
+    distance_km: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False)
+    ascent_m: Mapped[float | None] = mapped_column(Numeric(8, 1))
+    target_time_h: Mapped[float | None] = mapped_column(Numeric(6, 2))

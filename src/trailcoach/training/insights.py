@@ -207,6 +207,11 @@ def build_insights(
     return [asdict(i) for i in found]
 
 
+def sort_insights(items: list[dict[str, str]]) -> list[dict[str, str]]:
+    order = {"alert": 0, "warn": 1, "info": 2, "ok": 3}
+    return sorted(items, key=lambda i: order.get(i["level"], 9))
+
+
 def _pace(mps: float) -> str:
     sec = round(1000 / mps)
     return f"{sec // 60}:{sec % 60:02d}"

@@ -30,9 +30,13 @@ class Settings(BaseSettings):
     encryption_key: bytes | None = Field(default=None, alias="ENCRYPTION_KEY")
 
     # API key personal de Garmin Connect; nunca se guarda en la base de datos
-    garmin_personal_api_key: SecretStr | None = Field(
-        default=None, alias="GARMIN_PERSONAL_API_KEY"
-    )
+    garmin_personal_api_key: SecretStr | None = Field(default=None, alias="GARMIN_PERSONAL_API_KEY")
+
+    # Coach IA: proveedor "openai" o "anthropic"; las keys solo viven en .env
+    ai_provider: str = Field(default="openai", alias="AI_PROVIDER")
+    ai_model: str | None = Field(default=None, alias="AI_MODEL")
+    openai_api_key: SecretStr | None = Field(default=None, alias="OPENAI_API_KEY")
+    anthropic_api_key: SecretStr | None = Field(default=None, alias="ANTHROPIC_API_KEY")
 
     class Config:
         env_file = ".env"
