@@ -1,6 +1,5 @@
 """Source provider registry used by the ingestion orchestrator."""
 
-
 from trailcoach.sources.provider import SourceProvider
 
 

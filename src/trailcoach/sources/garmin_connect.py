@@ -54,7 +54,7 @@ _WELLNESS_CAPABILITIES: list[tuple[str, str, str | None]] = [
     ("steps", "native", "Resumen diario: movement.steps.value"),
     ("respiration", "native", "Resumen diario y sueño"),
     ("training_readiness", "unavailable", "No expuesto por la API Personal (HTTP 404)"),
-    ("vo2max_history", "unavailable", "No expuesto por la API Personal (HTTP 404)"),
+    ("vo2max", "native", "VO2 máx del reloj: maxmet/daily generic.vo2MaxPreciseValue"),
     ("training_status", "unavailable", "No expuesto por la API Personal (HTTP 404)"),
 ]
 _FIT_WELLNESS = {metric for metric, _, _ in _WELLNESS_CAPABILITIES}
@@ -89,6 +89,9 @@ SLEEP_METRICS: list[MetricSpec] = [
     ("sleep_avg_respiration_brpm", ("averageRespirationValue",), "brpm"),
     ("sleep_avg_stress", ("avgSleepStress",), "score"),
     ("sleep_need_min", ("sleepNeed", "actual"), "min"),
+]
+VO2MAX_METRICS: list[MetricSpec] = [
+    ("vo2max_rounded", ("vo2MaxValue",), "ml/kg/min"),
 ]
 HRV_METRICS: list[MetricSpec] = [
     ("hrv_weekly_avg_ms", ("weeklyAvg",), "ms"),
@@ -240,6 +243,17 @@ class WellnessMapper:
 
         return self._payload("hrv", body, items, build, HRV_METRICS)
 
+    def vo2max_summaries(self, body: bytes) -> WellnessPayload | None:
+        data = json.loads(body) if body.strip() else []
+        rows = list(data) if isinstance(data, list) else []
+        items = [r["generic"] for r in rows if isinstance(r, dict) and r.get("generic")]
+
+        def build(day: date, item: dict[str, Any]) -> WellnessDaily | None:
+            value = _number(item.get("vo2MaxPreciseValue")) or _number(item.get("vo2MaxValue"))
+            return self._record(day, vo2max=value) if value else None
+
+        return self._payload("vo2max", body, items, build, VO2MAX_METRICS)
+
 
 ClientFactory = Callable[[str], GarminConnectClient]
 
@@ -339,13 +353,14 @@ class GarminConnectProvider(SourceProvider):
     def wellness_payloads(
         self, account: AthleteSourceAccount, start: date, end: date
     ) -> list[WellnessPayload]:
-        """Descarga y mapea resumen diario, sueño y HRV de [start, end]."""
+        """Descarga y mapea resumen diario, sueño, HRV y VO2 máx de [start, end]."""
         client = self._get_client(account)
         mapper = WellnessMapper(self.source, account.athlete_id, self._today())
         payloads: list[WellnessPayload | None] = []
         payloads += [mapper.daily_summaries(b) for b in client.daily_summaries(start, end)]
         payloads += [mapper.sleep_summaries(b) for b in client.sleep_summaries(start, end)]
         payloads += [mapper.hrv_summaries(b) for b in client.hrv_summaries(start, end)]
+        payloads += [mapper.vo2max_summaries(b) for b in client.vo2max_summaries(start, end)]
         return [p for p in payloads if p is not None]
 
     def _import_wellness(

@@ -30,6 +30,8 @@ ACTIVITY_PAGE_SIZE = 100
 DAILY_SUMMARY_MAX_DAYS = 365
 SLEEP_MAX_DAYS = 31
 HRV_MAX_DAYS = 365
+VO2MAX_MAX_DAYS = 31
+VO2MAX_PATH = "/metrics-service/metrics/maxmet/daily"
 TOKEN_TTL_S = 23 * 3600
 
 RETRY_STATUSES = {429, 500, 502, 503, 504}
@@ -237,6 +239,20 @@ class GarminConnectClient:
     def hrv_summaries(self, start: date, end: date) -> Iterator[bytes]:
         for a, b in date_windows(start, end, HRV_MAX_DAYS):
             yield self.get(f"/hrv-service/hrv/daily/{a.isoformat()}/{b.isoformat()}")
+
+    def vo2max_summaries(self, start: date, end: date) -> Iterator[bytes]:
+        """VO2 máx diario calculado por el reloj (`maxmet`); vacío si no está expuesto."""
+        for a, b in date_windows(start, end, VO2MAX_MAX_DAYS):
+            try:
+                yield self.get(
+                    f"/metrics-service/metrics/maxmet/daily/{a.isoformat()}/{b.isoformat()}"
+                )
+            except GarminAuthError:
+                raise
+            except GarminConnectError as exc:
+                if exc.status == 404:
+                    return
+                raise
 
 
 def extract_fit(content: bytes) -> bytes:

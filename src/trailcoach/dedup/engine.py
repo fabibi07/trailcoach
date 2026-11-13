@@ -110,9 +110,7 @@ class DedupeEngine:
                 reason="no candidate within tolerance",
             )
 
-        priority_map = self._priority_map(
-            db, new_sa.athlete_id, metric="activity"
-        )
+        priority_map = self._priority_map(db, new_sa.athlete_id, metric="activity")
 
         best: tuple[SourceActivity, DedupeScore] | None = None
         for candidate in candidates:
@@ -172,9 +170,7 @@ class DedupeEngine:
             .first()
         )
 
-    def _find_candidates(
-        self, db: Session, new_sa: SourceActivity
-    ) -> list[SourceActivity]:
+    def _find_candidates(self, db: Session, new_sa: SourceActivity) -> list[SourceActivity]:
         if new_sa.start_time_utc is None:
             return []
 
@@ -199,11 +195,7 @@ class DedupeEngine:
         return query.all()
 
     def _priority_map(self, db: Session, athlete_id: uuid.UUID, metric: str) -> dict[str, int]:
-        row = (
-            db.query(SourcePriority)
-            .filter_by(athlete_id=athlete_id, metric=metric)
-            .first()
-        )
+        row = db.query(SourcePriority).filter_by(athlete_id=athlete_id, metric=metric).first()
         if row and row.priority:
             return {source: rank for rank, source in enumerate(row.priority)}
         return {}

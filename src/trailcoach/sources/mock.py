@@ -32,9 +32,7 @@ class MockSourceProvider(SourceProvider):
         """No-op authentication for the mock provider."""
         return {"status": "ok", "authentication_required": False, "source_type": "synthetic"}
 
-    def discover_capabilities(
-        self, account: AthleteSourceAccount
-    ) -> list[MetricCapability]:
+    def discover_capabilities(self, account: AthleteSourceAccount) -> list[MetricCapability]:
         """Return a controlled set of capabilities for contract tests."""
         metrics = [
             ("heart_rate", "native"),

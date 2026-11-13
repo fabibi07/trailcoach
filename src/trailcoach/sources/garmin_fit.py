@@ -232,9 +232,7 @@ class GarminFitProvider(SourceProvider):
                 return content
         return None
 
-    def payload_from_raw(
-        self, content: bytes, source_activity_id: str
-    ) -> ActivityPayload | None:
+    def payload_from_raw(self, content: bytes, source_activity_id: str) -> ActivityPayload | None:
         return self._payload(self.parser.parse_bytes(content), content, source_activity_id)
 
     def get_wellness(

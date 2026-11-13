@@ -41,7 +41,7 @@ from trailcoach.ingest.streams import STREAM_COLUMNS, write_stream_parquet
 def semicircles_to_degrees(v):
     if v is None:
         return None
-    return v * (180.0 / (2 ** 31))
+    return v * (180.0 / (2**31))
 
 
 def none_or_float(v: Any) -> float | None:
@@ -154,9 +154,7 @@ def _sport_from_fit(
 FOOT_SPORTS = {"running", "trail_running", "walking", "hiking"}
 
 
-def _cadence_spm(
-    cadence: Any, fractional: Any, sport: str
-) -> float | None:
+def _cadence_spm(cadence: Any, fractional: Any, sport: str) -> float | None:
     base = none_or_float(cadence)
     if base is None:
         return None
@@ -440,13 +438,10 @@ class FitParser:
         manufacturer = _first(["manufacturer"], device_info) or _first(
             ["manufacturer"], file_id_msg
         )
-        product = (
-            _first(["product_name", "garmin_product", "product"], device_info)
-            or _first(["garmin_product", "product"], file_id_msg)
+        product = _first(["product_name", "garmin_product", "product"], device_info) or _first(
+            ["garmin_product", "product"], file_id_msg
         )
-        serial = _first(["serial_number"], device_info) or _first(
-            ["serial_number"], file_id_msg
-        )
+        serial = _first(["serial_number"], device_info) or _first(["serial_number"], file_id_msg)
         return FitDeviceInfo(
             manufacturer=str(manufacturer) if manufacturer is not None else None,
             product=str(product) if product is not None else None,
@@ -475,9 +470,7 @@ class FitParser:
             ascent_m=doc.ascent_m,
             sport_raw=doc.sport_raw or doc.sport,
             device_name=doc.device.name,
-            external_id_raw=(
-                json.dumps(doc.file_id, default=str)[:128] if doc.file_id else None
-            ),
+            external_id_raw=(json.dumps(doc.file_id, default=str)[:128] if doc.file_id else None),
             summary_raw_file_id=raw_file_id,
             fit_raw_file_id=raw_file_id,
             account_id=account_id,
@@ -530,9 +523,7 @@ class FitParser:
             name=None,
         )
 
-    def build_intervals(
-        self, activity_id: UUID | None, doc: FitDocument
-    ) -> list[ActivityInterval]:
+    def build_intervals(self, activity_id: UUID | None, doc: FitDocument) -> list[ActivityInterval]:
         intervals: list[ActivityInterval] = []
         for seq, lap in enumerate(doc.laps, start=1):
             start = _parse_timestamp(lap.get("start_time"))

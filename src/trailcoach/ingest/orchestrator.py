@@ -352,9 +352,7 @@ class IngestionOrchestrator:
                 serial_number=info.get("serial_number"),
                 manufacturer=info.get("manufacturer"),
                 model=info.get("model"),
-                name=" ".join(
-                    str(p) for p in [info.get("manufacturer"), info.get("model")] if p
-                )
+                name=" ".join(str(p) for p in [info.get("manufacturer"), info.get("model")] if p)
                 or None,
             )
             self.db.add(device)

@@ -185,8 +185,8 @@
         <div id="best-table">Cargando...</div>
       </div>
       <div class="panel">
-        <h2>VO2 máx estimado (VDOT)</h2>
-        <p class="help">Tu capacidad aeróbica máxima estimada desde tus mejores 5 km, 10 km y media maratón reales (fórmula VDOT de Jack Daniels). Garmin no entrega su VO2 máx por la API, así que este valor es propio y suele quedar algo por debajo del que muestra el reloj. Lo importante es la <b>tendencia</b>: si sube, estás más en forma. Referencia aproximada para hombres de 30-40 años: 42-46 promedio, 47-52 bueno, &gt;52 muy bueno.</p>
+        <h2>VO2 máx</h2>
+        <p class="help">Tu capacidad aeróbica máxima (ml de oxígeno por kg por minuto). <b>Reloj</b> es el valor que calcula Garmin (el mismo de la app Garmin Connect). <b>Estimado (VDOT)</b> se calcula aparte con tus mejores 5 km, 10 km y media maratón reales (fórmula de Jack Daniels) y sirve para contrastar. Lo importante es la <b>tendencia</b>: si sube, estás más en forma. Referencia aproximada para hombres de 30-40 años: 42-46 promedio, 47-52 bueno, &gt;52 muy bueno.</p>
         <div class="cards" id="vdot-cards"></div>
         <div id="vdot-chart" class="chart" style="height:220px"></div>
       </div>
@@ -564,13 +564,17 @@
         ${bestDefs.map(([k, n, km]) => `<tr><td>${n}</td><td>${cell(d.all_time[k], km)}</td><td>${cell(d.last_90d[k], km)}</td></tr>`).join('')}
         <tr><td>Ritmo de 20 min</td><td>${p20(d.all_time['20min_mps'])}</td><td>${p20(d.last_90d['20min_mps'])}</td></tr></tbody></table>`;
       const vc = (e, l) => `<div class="card"><div class="value">${e ? fmt(e.value, 1) : '-'}</div><div class="label">${l}${e ? '<br>' + fmtDate(e.date) : ''}</div></div>`;
-      document.getElementById('vdot-cards').innerHTML = vc(d.last_90d.vdot, 'Actual (últimos 90 días)') + vc(d.all_time.vdot, 'Mejor (2 años)');
+      document.getElementById('vdot-cards').innerHTML = vc(d.vo2max_device, 'Reloj (último)') + vc(d.last_90d.vdot, 'Estimado VDOT (90 días)') + vc(d.all_time.vdot, 'Estimado VDOT mejor (2 años)');
       chartOf('vdot-chart').setOption({
         tooltip: { trigger: 'axis' },
-        grid: { left: 45, right: 20, top: 20, bottom: 30 },
+        grid: { left: 45, right: 20, top: 30, bottom: 30 },
         xAxis: { type: 'category', data: d.monthly.map(m => m.month), ...axisStyle, splitLine: { show: false } },
         yAxis: { type: 'value', scale: true, name: 'ml/kg/min', ...axisStyle },
-        series: [{ name: 'VDOT', type: 'line', connectNulls: true, data: d.monthly.map(m => m.vdot ?? null), lineStyle: { color: '#a855f7' }, itemStyle: { color: '#a855f7' } }]
+        legend: { textStyle: { color: '#cbd5e1' }, top: 0 },
+        series: [
+          { name: 'Reloj', type: 'line', connectNulls: true, data: d.monthly.map(m => m.vo2max_device ?? null), lineStyle: { color: '#22c55e' }, itemStyle: { color: '#22c55e' } },
+          { name: 'Estimado VDOT', type: 'line', connectNulls: true, data: d.monthly.map(m => m.vdot ?? null), lineStyle: { color: '#a855f7', type: 'dashed' }, itemStyle: { color: '#a855f7' } }
+        ]
       }, true);
       const colors = ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6'];
       chartOf('best-chart').setOption({

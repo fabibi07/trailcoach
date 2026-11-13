@@ -116,9 +116,7 @@ class SourceProvider(ABC):
         """
 
     @abstractmethod
-    def discover_capabilities(
-        self, account: AthleteSourceAccount
-    ) -> list[MetricCapability]:
+    def discover_capabilities(self, account: AthleteSourceAccount) -> list[MetricCapability]:
         """Return the metrics this source can provide for this account."""
 
     @abstractmethod
@@ -148,9 +146,7 @@ class SourceProvider(ABC):
     ) -> bytes | None:
         """Download the raw activity file when the source supports it."""
 
-    def payload_from_raw(
-        self, content: bytes, source_activity_id: str
-    ) -> ActivityPayload | None:
+    def payload_from_raw(self, content: bytes, source_activity_id: str) -> ActivityPayload | None:
         """Rebuild an `ActivityPayload` from a stored raw record.
 
         Enables reprocessing raw data with a newer parser without

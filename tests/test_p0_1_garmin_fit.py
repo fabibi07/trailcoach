@@ -236,9 +236,9 @@ def test_import_result_payload_and_links_account(account, fit_dir):
     assert payload.stream_rows and payload.intervals
     assert result.cursor == {"last_start_time_utc": spec.start.isoformat()}
 
-    assert GarminFitProvider().download_activity_file(
-        account, sa.source_activity_id
-    ) == build_fit(spec)
+    assert GarminFitProvider().download_activity_file(account, sa.source_activity_id) == build_fit(
+        spec
+    )
     assert GarminFitProvider().download_activity_file(account, "missing") is None
 
 

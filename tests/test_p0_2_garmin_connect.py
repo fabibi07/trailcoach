@@ -94,6 +94,7 @@ class FakeGarmin:
         self.calls: list[tuple[str, str, dict[str, str]]] = []
         self.revoked = False
         self.throttle = 0
+        self.vo2max = True
 
     def add_activity(self, activity_id: int, spec: SyntheticActivity) -> bytes:
         content = build_fit(spec)
@@ -149,6 +150,20 @@ class FakeGarmin:
             if not self._in(a, b):
                 return HttpResponse(204, b"")
             return self._json({"hrvSummaries": [hrv_item(d) for d in self._in(a, b)]})
+        if path.startswith("/metrics-service/metrics/maxmet/daily/") and self.vo2max:
+            a, b = path.rsplit("/", 2)[1:]
+            return self._json(
+                [
+                    {
+                        "generic": {
+                            "calendarDate": d.isoformat(),
+                            "vo2MaxPreciseValue": 51.3,
+                            "vo2MaxValue": 51.0,
+                        }
+                    }
+                    for d in self._in(a, b)
+                ]
+            )
         return HttpResponse(404, b"")
 
     @staticmethod
@@ -220,7 +235,7 @@ def test_empty_range_with_http_204_is_not_an_error(db, account, fake):
     provider = make_provider(fake)
     result = provider.initial_import(account, start=date(2023, 1, 1), end=TODAY)
     assert result.errors == []
-    assert {p.name for p in result.wellness_payloads} == {"daily_summary", "sleep", "hrv"}
+    assert {p.name for p in result.wellness_payloads} == {"daily_summary", "sleep", "hrv", "vo2max"}
     assert result.cursor["wellness_through"] == TODAY.isoformat()
 
 
@@ -318,7 +333,7 @@ def test_initial_import_activities_wellness_and_raw(db, account, fake):
     assert len(rows) == 3
     first = rows[0]
     assert (first.resting_hr, first.sleep_score, first.hrv_ms) == (50, 81, 42)
-    assert set(first.provenance["raw_file_ids"]) == {"daily_summary", "sleep", "hrv"}
+    assert set(first.provenance["raw_file_ids"]) == {"daily_summary", "sleep", "hrv", "vo2max"}
     assert first.raw_file_id is not None
     assert rows[-1].data_quality == "partial"
 
@@ -453,3 +468,18 @@ def test_cli_ingest_garmin_connect(db, athlete, fake, monkeypatch):
     assert API_KEY not in result.output
     acc = db.query(AthleteSourceAccount).filter_by(source="garmin_connect").one()
     assert acc.auth_json == {"key_env": "GARMIN_PERSONAL_API_KEY"}
+
+
+def test_vo2max_is_imported_from_maxmet(db, account, fake):
+    from trailcoach.db.models import WellnessDaily
+
+    summary = IngestionOrchestrator(db).run(account, make_provider(fake))
+    assert summary.errors == []
+    rows = db.query(WellnessDaily).filter(WellnessDaily.vo2max.isnot(None)).all()
+    assert rows and all(float(r.vo2max) == 51.3 for r in rows)
+
+
+def test_vo2max_endpoint_missing_is_not_an_error(db, account, fake):
+    fake.vo2max = False
+    summary = IngestionOrchestrator(db).run(account, make_provider(fake))
+    assert summary.errors == []

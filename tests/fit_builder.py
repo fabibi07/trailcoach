@@ -37,8 +37,22 @@ SUB_SPORT_GENERIC = 0
 MANUFACTURER_GARMIN = 1
 
 _CRC_TABLE = [
-    0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401,
-    0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400,
+    0x0000,
+    0xCC01,
+    0xD801,
+    0x1400,
+    0xF001,
+    0x3C00,
+    0x2800,
+    0xE401,
+    0xA001,
+    0x6C00,
+    0x7800,
+    0xB401,
+    0x5000,
+    0x9C01,
+    0x8801,
+    0x4400,
 ]
 
 
@@ -297,6 +311,4 @@ def build_fit(spec: SyntheticActivity | None = None) -> bytes:
 
 def shifted(spec: SyntheticActivity, seconds: int) -> SyntheticActivity:
     """Return a copy of `spec` whose start is shifted by `seconds`."""
-    return SyntheticActivity(
-        **{**spec.__dict__, "start": spec.start + timedelta(seconds=seconds)}
-    )
+    return SyntheticActivity(**{**spec.__dict__, "start": spec.start + timedelta(seconds=seconds)})

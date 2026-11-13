@@ -21,6 +21,7 @@ from trailcoach.db.models import (
     ActivityZoneTime,
     Athlete,
     RaceGoal,
+    WellnessDaily,
 )
 from trailcoach.db.session import get_db
 from trailcoach.training.best_efforts import DISTANCES_M, best_time_for_distance, vdot
@@ -235,7 +236,25 @@ def best_efforts(days: int = 730) -> dict[str, Any]:
                 better = cur.get(k) is None or (v > cur[k] if k in HIGHER_IS_BETTER else v < cur[k])
                 if better:
                     cur[k] = v
+        device_rows = (
+            db.query(WellnessDaily.date, WellnessDaily.vo2max)
+            .filter(
+                WellnessDaily.athlete_id == athlete.id,
+                WellnessDaily.vo2max.isnot(None),
+                WellnessDaily.date >= start,
+            )
+            .order_by(WellnessDaily.date)
+            .all()
+        )
+        for d, v in device_rows:
+            monthly.setdefault(d.isoformat()[:7], {"month": d.isoformat()[:7]})["vo2max_device"] = (
+                float(v)
+            )
+        latest = device_rows[-1] if device_rows else None
         return {
+            "vo2max_device": (
+                {"value": float(latest[1]), "date": latest[0].isoformat()} if latest else None
+            ),
             "all_time": {k: best(efforts, k) for k in keys},
             "last_90d": {k: best([r for r in efforts if r["date"] >= cutoff], k) for k in keys},
             "monthly": [monthly[m] for m in sorted(monthly)],
