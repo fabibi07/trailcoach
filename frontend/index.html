@@ -186,7 +186,7 @@
       </div>
       <div class="panel">
         <h2>VO2 máx</h2>
-        <p class="help">Tu capacidad aeróbica máxima (ml de oxígeno por kg por minuto). <b>Reloj</b> es el valor que calcula Garmin (el mismo de la app Garmin Connect). <b>Estimado (VDOT)</b> se calcula aparte con tus mejores 5 km, 10 km y media maratón reales (fórmula de Jack Daniels) y sirve para contrastar. Lo importante es la <b>tendencia</b>: si sube, estás más en forma. Referencia aproximada para hombres de 30-40 años: 42-46 promedio, 47-52 bueno, &gt;52 muy bueno.</p>
+        <p class="help">Tu capacidad aeróbica máxima (ml de oxígeno por kg por minuto). <b>Reloj</b> es el valor que calcula Garmin (el mismo de la app Garmin Connect). El gráfico muestra la evolución mensual del reloj; lo importante es la <b>tendencia</b>: si sube, estás más en forma. <b>Estimado (VDOT)</b> sale de tus mejores 5 km, 10 km y media maratón reales (fórmula de Jack Daniels). Solo es comparable si corriste esas distancias a máximo esfuerzo (carrera o test); si no, queda bastante más bajo que el del reloj. La diferencia entre ambos indica cuánto podrías mejorar tus marcas si las corrieras al máximo. Referencia aproximada para hombres de 30-40 años: 42-46 promedio, 47-52 bueno, &gt;52 muy bueno.</p>
         <div class="cards" id="vdot-cards"></div>
         <div id="vdot-chart" class="chart" style="height:220px"></div>
       </div>
@@ -572,8 +572,7 @@
         yAxis: { type: 'value', scale: true, name: 'ml/kg/min', ...axisStyle },
         legend: { textStyle: { color: '#cbd5e1' }, top: 0 },
         series: [
-          { name: 'Reloj', type: 'line', connectNulls: true, data: d.monthly.map(m => m.vo2max_device ?? null), lineStyle: { color: '#22c55e' }, itemStyle: { color: '#22c55e' } },
-          { name: 'Estimado VDOT', type: 'line', connectNulls: true, data: d.monthly.map(m => m.vdot ?? null), lineStyle: { color: '#a855f7', type: 'dashed' }, itemStyle: { color: '#a855f7' } }
+          { name: 'Reloj', type: 'line', connectNulls: true, data: d.monthly.map(m => m.vo2max_device ?? null), lineStyle: { color: '#22c55e' }, itemStyle: { color: '#22c55e' } }
         ]
       }, true);
       const colors = ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6'];
@@ -701,7 +700,7 @@
           ${card(fmtInt(detail.avg_power), 'Potencia media (W)')}
           ${dv.aerobic_training_effect != null ? card(fmt(dv.aerobic_training_effect, 1), 'Efecto aeróbico · ' + teLabel(dv.aerobic_training_effect)) : ''}
           ${dv.anaerobic_training_effect != null ? card(fmt(dv.anaerobic_training_effect, 1), 'Efecto anaeróbico · ' + teLabel(dv.anaerobic_training_effect)) : ''}
-          ${dv.rpe != null ? card(fmt(dv.rpe / 10, 0) + '/10', 'Esfuerzo percibido (RPE)') : ''}
+          ${dv.rpe != null ? card(fmt(dv.rpe, 0) + '/10', 'Esfuerzo percibido (RPE)') : ''}
           ${dv.feel_pct != null ? card(feelLabel(dv.feel_pct), 'Cómo te sentiste') : ''}
           ${dv.calories_kcal != null ? card(fmtInt(dv.calories_kcal), 'Calorías (kcal)') : ''}
         </div>
