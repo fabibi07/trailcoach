@@ -12,6 +12,7 @@
     .muted { color:var(--muted); font-size:.85rem; }
     .tabs { display:flex; gap:.5rem; margin-bottom:1rem; overflow-x:auto; -webkit-overflow-scrolling:touch; }
     .tab { white-space:nowrap; flex:0 0 auto; }
+    .tabs::-webkit-scrollbar { display:none; } .tabs { scrollbar-width:none; }
     .zbar { display:flex; height:1.4rem; border-radius:.4rem; overflow:hidden; margin:.3rem 0; }
     .zbar div { display:flex; align-items:center; justify-content:center; font-size:.7rem; color:#0f172a; font-weight:600; }
     @media (max-width:600px) {
@@ -19,7 +20,7 @@
       .grid { grid-template-columns:1fr; }
       .cards { grid-template-columns: repeat(2, 1fr); }
       .card .value { font-size:1.2rem; }
-      #activity .panel:first-child { max-height:40vh !important; }
+      #activity .two-col > .panel:first-child { max-height:40vh !important; }
     }
     .tab { background:var(--panel); color:var(--text); border:none; padding:.5rem 1rem; border-radius:.5rem; cursor:pointer; }
     .tab.active { background:var(--accent); }
@@ -611,7 +612,7 @@
       if (el) el.classList.add('active');
       currentActivityId = id;
 
-      const [detail, series, m] = await Promise.all([
+      const [detail, m, series] = await Promise.all([
         fetch(`/v1/activities/${id}`).then(r => r.json()),
         fetch(`/v1/activities/${id}/metrics`).then(r => r.json()),
         fetch(`/v1/activities/${id}/timeseries?max_points=2000`).then(r => r.json())
@@ -660,7 +661,8 @@
       ].map(([ch, l, u, d, h]) => { let v = chMean(detail, ch); if (v == null) return ''; if (ch === 'step_length_mm') v = v / 1000;
         return `<tr><td>${l}</td><td>${fmt(v, d)} ${u}</td><td class="muted">${h}</td></tr>`; }).join('');
       const dec = m.decoupling_pct;
-      const decTxt = dec == null ? 'Necesita ≥ 20 min con pulso y GPS.' :
+      const decTxt = detail.sport !== 'running' ? 'Solo se calcula en carrera de ruta/pista: en trail el desnivel lo distorsiona.' : dec == null ? 'Necesita ≥ 20 min con pulso y GPS.' :
+        dec < 0 ? 'Negativo: la 2.ª mitad fue más eficiente (normal si calentaste al inicio o la 1.ª mitad tuvo más subida).' :
         dec < 5 ? 'Bajo 5 %: buena base aeróbica, el pulso se mantuvo estable.' :
         dec < 10 ? 'Entre 5 y 10 %: algo de fatiga, calor o deshidratación al final.' :
         'Sobre 10 %: el pulso subió mucho para el mismo ritmo (fatiga, calor, poca base o sesión con cambios de intensidad/desnivel).';
@@ -686,7 +688,7 @@
         <h3 style="margin:1rem 0 .3rem">Desacople aeróbico: ${dec == null ? '-' : fmt(dec, 1) + ' %'}</h3>
         <p class="help">Compara ritmo/pulso de la 1.ª y la 2.ª mitad. ${decTxt}</p>
         ${dyn ? `<h3 style="margin:1rem 0 .3rem">Técnica de carrera (promedios)</h3><table><tbody>${dyn}</tbody></table>` : ''}
-        ${detail.intervals?.length ? `<h3 style="margin:1rem 0 .3rem">Vueltas</h3><div class="laps-wrap"><table><thead><tr><th>#</th><th>Dist</th><th>Tiempo</th><th>Ritmo</th><th>D+</th><th>Pulso</th></tr></thead><tbody>${detail.intervals.map(i => `<tr><td>${i.seq}</td><td>${fmt(i.distance_km, 2)} km</td><td>${fmt(i.duration_min, 1)} min</td><td>${i.avg_speed_kmh ? fmtPace(60 / i.avg_speed_kmh) : '-'}</td><td>${fmtInt(i.ascent_m)} m</td><td>${fmtInt(i.avg_hr)}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
+        ${detail.intervals?.length ? `<h3 style="margin:1rem 0 .3rem">Vueltas</h3><div class="laps-wrap"><table><thead><tr><th>#</th><th>Dist</th><th>Tiempo</th><th>Ritmo</th><th>D+</th><th>Pulso</th></tr></thead><tbody>${detail.intervals.map(i => `<tr><td>${i.seq}</td><td>${fmt(i.distance_km, 2)} km</td><td>${fmt(i.duration_min, 1)} min</td><td>${i.avg_speed_kmh ? fmtPace(60 / i.avg_speed_kmh) : (i.distance_km && i.duration_min ? fmtPace(i.duration_min / i.distance_km) : '-')}</td><td>${fmtInt(i.ascent_m)} m</td><td>${fmtInt(i.avg_hr)}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
     }
 
     function renderChannelSelector(available) {

@@ -145,7 +145,7 @@ def activity_metrics(activity_id: UUID) -> dict[str, Any]:
                 out["lthr"] = float(lthr.value)
                 z = zone_seconds(st["t_s"], st["hr_bpm"], float(lthr.value))
                 out["zones_lthr"] = {k: round(v / 60, 1) for k, v in z.items()}
-            if "speed_mps" in st:
+            if "speed_mps" in st and a.sport == "running":
                 out["decoupling_pct"] = decoupling_pct(st["t_s"], st["speed_mps"], st["hr_bpm"])
         return out
 
@@ -187,7 +187,7 @@ def best_efforts(days: int = 730) -> dict[str, Any]:
             if "distance_m" in st:
                 for k, d in DISTANCES_M.items():
                     row[k] = best_time_for_distance(st["t_s"], st["distance_m"], d)
-            if "speed_mps" in st:
+            if "speed_mps" in st and a.sport == "running":
                 ok = guard_speed(st["t_s"], st["speed_mps"])
                 row["20min_mps"] = best_mean(st["t_s"][ok], st["speed_mps"][ok], 1200)
             efforts.append(row)
